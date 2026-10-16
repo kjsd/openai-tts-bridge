@@ -41,6 +41,27 @@ static MULTI_SPACE_REGEX: LazyLock<Regex> = LazyLock::new(|| {
         .expect("Failed to compile MULTI_SPACE_REGEX")
 });
 
+const MODIFIER_PREFIXES: &[&str] = &[
+    "very ",
+    "deep ",
+    "deeply ",
+    "heavy ",
+    "heavily ",
+    "extremely ",
+    "intense ",
+    "intensely ",
+    "strong ",
+    "strongly ",
+    "loud ",
+    "loudly ",
+    "super ",
+    "slightly ",
+    "mildly ",
+    "a bit ",
+    "a little ",
+    "somewhat ",
+];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParsedPrompt {
     pub cleaned_text: String,
@@ -65,6 +86,15 @@ impl Default for ParsedPrompt {
 pub struct EmotionParser;
 
 impl EmotionParser {
+    fn strip_modifier_prefix(tag: &str) -> &str {
+        for prefix in MODIFIER_PREFIXES {
+            if let Some(rest) = tag.strip_prefix(prefix) {
+                return rest.trim();
+            }
+        }
+        tag
+    }
+
     pub fn parse(input: &str) -> ParsedPrompt {
         let mut detected_tags = Vec::new();
         let mut emotion_sliders = HashMap::new();
@@ -119,28 +149,35 @@ impl EmotionParser {
         let sanitized = ORPHAN_BRACKETS_REGEX.replace_all(trimmed, "").to_string();
         let cleaned_trimmed = sanitized.trim().to_string();
 
-        // Apply rules based on detected tags (SkyrimNet vbeta27 carry_tags + Chatterbox + Nina custom tags)
+        // Apply rules based on detected tags (SkyrimNet vbeta27 carry_tags + Irodori 39 styles + Chatterbox)
         for tag in &detected_tags {
-            match tag.as_str() {
-                // Happy / Laugh / Joy / Proud / Confident
+            let base_tag = Self::strip_modifier_prefix(tag.as_str());
+            match base_tag {
+                // Happy / Laugh / Joy / Proud / Confident /Glad
                 "laughter" | "laugh" | "laughs" | "laughing" | "happy" | "happily" | "joy"
-                | "joyful" | "joyfully" | "cheer" | "cheerful" | "cheerfully" | "smile"
-                | "hopeful" | "proud" | "proudly" | "confident" | "confidently"
+                | "joyful" | "joyfully" | "cheer" | "cheerful" | "cheerfully" | "glad"
+                | "gladly" | "delighted" | "delightedly" | "pleased" | "smile" | "smiling"
+                | "hopeful" | "hopefully" | "proud" | "proudly" | "confident" | "confidently"
                 | "emotion-happy" | "emotion-joy" | "emotion-cheerful" | "emotion-proud"
                 | "sfx-laughter" | "sfx-laugh"
-                | "笑" | "笑い" | "喜" | "歓喜" => {
+                | "笑" | "笑い" | "喜" | "喜び" | "歓喜" | "楽しげ" | "嬉しそう" => {
                     emotion_sliders.insert("happy".to_string(), 0.7);
                     emotion_cfg_scale = 1.2;
                 }
+                // Chuckle / Teasing / Coaxing / Playful
                 "chuckle" | "chuckles" | "chuckling" | "giggle" | "giggles" | "giggling"
-                | "playful" | "playfully" | "teasing" | "teasingly"
-                | "flirtatious" | "flirtatiously" | "sfx-chuckle" | "sfx-giggle"
-                | "style-chuckle" | "style-giggle" | "style-playful" | "style-teasing"
-                | "くすくす" => {
+                | "snicker" | "snickers" | "playful" | "playfully" | "teasing" | "teasingly"
+                | "tease" | "coaxing" | "coaxingly" | "coax" | "sweetly" | "coy" | "coyly"
+                | "flirtatious" | "flirtatiously" | "flirty" | "amused" | "amusedly"
+                | "sfx-chuckle" | "sfx-giggle" | "style-chuckle" | "style-giggle"
+                | "style-playful" | "style-teasing"
+                | "くすくす" | "含み笑い" | "からかい" | "甘え" => {
                     emotion_sliders.insert("happy".to_string(), 0.5);
                     emotion_cfg_scale = 1.15;
                 }
-                "excited" | "excitedly" | "emotion-excited" | "興奮" | "わくわく" => {
+                "excited" | "excitedly" | "gleeful" | "gleefully" | "ecstatic"
+                | "enthusiastic" | "enthusiastically" | "emotion-excited"
+                | "興奮" | "わくわく" => {
                     emotion_sliders.insert("happy".to_string(), 0.8);
                     emotion_cfg_scale = 1.2;
                     speed_factor = 1.10;
@@ -149,86 +186,109 @@ impl EmotionParser {
                 // Whisper / Soft / Quiet / Gentle / Tender / Sultry (deliberate & slower pacing)
                 "whisper" | "whispering" | "whispers" | "whispered" | "hushed"
                 | "gentle" | "gently" | "sweet" | "soft" | "softly" | "tender" | "tenderly"
-                | "warm" | "warmly" | "seductive" | "seductively" | "sultry" | "reverent"
-                | "shush" | "shh" | "quiet" | "quietly" | "murmurs" | "murmuring"
-                | "mutters" | "muttering" | "mumbles" | "mumbling" | "conspiratorial"
+                | "warm" | "warmly" | "affectionate" | "affectionately" | "loving" | "lovingly"
+                | "seductive" | "seductively" | "sultry" | "reverent" | "reverently"
+                | "shush" | "shh" | "quiet" | "quietly" | "murmur" | "murmurs" | "murmuring"
+                | "mutter" | "mutters" | "muttering" | "mumble" | "mumbles" | "mumbling"
+                | "conspiratorial" | "conspiratorially" | "under breath" | "muffled"
                 | "style-whisper"
-                | "囁き" | "ささやき" | "静かに" => {
+                | "囁き" | "ささやき" | "優しく" | "静かに" => {
                     emotion_sliders.insert("happy".to_string(), 0.2);
                     emotion_cfg_scale = 1.1;
                     speed_factor = 0.88;
                 }
 
-                // Sad / Cry / Sigh / Tired / Weary / Sorrow (slower & heavy pacing)
-                "sigh" | "sighs" | "sighing" | "tired" | "exhausted" | "weary" | "wearily"
-                | "sleepy" | "sleepily" | "resigned" | "bored" | "sfx-sigh"
-                | "ため息" => {
+                // Sigh / Breath / Tired / Sleepy / Sluggish / Languid (slower & heavy pacing)
+                "sigh" | "sighs" | "sighing" | "breath" | "breathe" | "breathing"
+                | "exhale" | "inhale" | "tired" | "tiredly" | "exhausted" | "weary"
+                | "wearily" | "sleepy" | "sleepily" | "drowsy" | "sluggish" | "sluggishly"
+                | "languid" | "languidly" | "resigned" | "resignedly" | "bored"
+                | "sfx-sigh" | "sfx-breath"
+                | "ため息" | "吐息" | "眠そう" | "気だるげ" => {
                     emotion_sliders.insert("sad".to_string(), 0.6);
                     emotion_cfg_scale = 1.15;
                     speed_factor = 0.90;
                 }
-                "sad" | "sadly" | "sorrow" | "sorrowful" | "mournful" | "grief" | "grieving"
-                | "melancholy" | "wistful" | "tearful" | "tearfully" | "ashamed"
+                // Sad / Cry / Sorrow / Pleading
+                "sad" | "sadly" | "sorrow" | "sorrowful" | "sorrowfully" | "mournful"
+                | "mournfully" | "grief" | "grieving" | "heartbroken" | "melancholy"
+                | "wistful" | "tearful" | "tearfully" | "ashamed" | "hurt" | "remorseful"
                 | "crying" | "cry" | "cries" | "weep" | "weeping" | "sob" | "sobs" | "sobbing"
-                | "plead" | "pleading" | "emotion-sad" | "emotion-sorrow" | "emotion-melancholy"
+                | "plead" | "pleading" | "pleadingly" | "beg" | "begging" | "imploring"
+                | "emotion-sad" | "emotion-sorrow" | "emotion-melancholy"
                 | "sfx-cry" | "sfx-sob"
-                | "悲しい" | "哀" | "泣き" | "泣" => {
+                | "悲しい" | "悲しみ" | "哀" | "泣き" | "泣" | "嗚咽" | "懇願" => {
                     emotion_sliders.insert("sad".to_string(), 0.7);
                     emotion_cfg_scale = 1.2;
                     speed_factor = 0.90;
                 }
+                // Groan / Moan / Pain / Agony / Drunk
                 "groan" | "groans" | "groaning" | "moan" | "moans" | "moaning"
-                | "strained" | "pained" | "pain" | "hoarse" | "hoarsely" | "weak" | "weakly"
-                | "drunk" | "drunkenly" | "sfx-groan" | "sfx-moan" | "emotion-pain"
-                | "うめき" | "呻き" => {
+                | "grunt" | "grunts" | "strained" | "pained" | "pain" | "painful"
+                | "painfully" | "agony" | "agonizing" | "agonizingly" | "distress"
+                | "distressed" | "hoarse" | "hoarsely" | "weak" | "weakly"
+                | "drunk" | "drunken" | "drunkenly" | "tipsy" | "slurred"
+                | "sfx-groan" | "sfx-moan" | "emotion-pain"
+                | "うめき" | "呻き" | "喘ぎ" | "苦しげ" | "酔っ払い" => {
                     emotion_sliders.insert("sad".to_string(), 0.5);
                     emotion_sliders.insert("angry".to_string(), 0.3);
                     emotion_cfg_scale = 1.15;
                     speed_factor = 0.90;
                 }
-                "sniff" | "sniffs" | "sniffling" | "sfx-sniff" | "鼻をすする" => {
+                "sniff" | "sniffs" | "sniffling" | "sniffle" | "sniffles" | "sfx-sniff"
+                | "鼻をすする" => {
                     emotion_sliders.insert("sad".to_string(), 0.5);
                     emotion_cfg_scale = 1.15;
                     speed_factor = 0.92;
                 }
 
-                // Angry / Shout / Irritated / Stern / Menacing (fast & intense pacing)
-                "angry" | "angrily" | "anger" | "mad" | "furious" | "furiously"
-                | "irritated" | "annoyed" | "frustrated" | "impatient" | "impatiently"
-                | "bitter" | "bitterly" | "shout" | "shouts" | "shouting"
-                | "yell" | "yells" | "yelling" | "loudly" | "scream" | "screams" | "screaming"
+                // Angry / Shout / Scream / Sulking / Displeased (intense pacing)
+                "angry" | "angrily" | "anger" | "mad" | "furious" | "furiously" | "enraged"
+                | "irritated" | "irritatedly" | "annoyed" | "frustrated" | "frustratedly"
+                | "impatient" | "impatiently" | "displeased" | "dissatisfied" | "sulking"
+                | "sulk" | "sulkily" | "pouting" | "pout" | "grumpy" | "bitter" | "bitterly"
+                | "shout" | "shouts" | "shouting" | "yell" | "yells" | "yelling" | "loud"
+                | "loudly" | "scream" | "screams" | "screaming" | "shriek" | "shrieking"
                 | "menacing" | "menacingly" | "threatening" | "defiant" | "defiantly"
                 | "stern" | "sternly" | "commanding" | "authoritative" | "gruff" | "gruffly"
                 | "emotion-angry" | "emotion-furious" | "emotion-frustrated" | "style-shout"
-                | "怒り" | "怒" | "叫び" => {
+                | "sfx-scream"
+                | "怒り" | "怒" | "叫び" | "悲鳴" | "不満" | "拗ね" => {
                     emotion_sliders.insert("angry".to_string(), 0.75);
                     emotion_cfg_scale = 1.2;
                     speed_factor = 1.15;
                 }
 
-                // Surprise / Shock / Gasp / Curious
-                "surprise" | "surprised" | "shock" | "shocked" | "curious" | "curiously"
+                // Surprise / Shock / Questioning / Wondering / Curious
+                "surprise" | "surprised" | "shock" | "shocked" | "startled" | "astonished"
+                | "amazed" | "awed" | "awe" | "questioning" | "questioningly" | "wondering"
+                | "wonderingly" | "curious" | "curiously" | "puzzled"
                 | "emotion-surprise" | "emotion-surprised" | "emotion-curious"
-                | "驚き" | "驚" => {
+                | "驚き" | "驚" | "感嘆" | "疑問" => {
                     emotion_sliders.insert("surprised".to_string(), 0.7);
                     emotion_cfg_scale = 1.2;
                 }
                 "gasp" | "gasps" | "gasping" | "pant" | "pants" | "panting"
-                | "breathless" | "breathlessly" | "sfx-gasp" | "sfx-pant"
-                | "ハッ" | "息をのむ" => {
+                | "heavy breathing" | "shortness of breath" | "breathless" | "breathlessly"
+                | "out of breath" | "sfx-gasp" | "sfx-pant"
+                | "ハッ" | "息をのむ" | "息切れ" => {
                     emotion_sliders.insert("surprised".to_string(), 0.6);
                     emotion_sliders.insert("fear".to_string(), 0.3);
                     emotion_cfg_scale = 1.15;
                 }
 
-                // Fear / Scared / Nervous / Urgent / Trembling
-                "fear" | "fearful" | "scared" | "terrified" | "frightened" | "afraid" | "panicked"
-                | "nervous" | "nervously" | "anxious" | "anxiously" | "worried"
-                | "trembling" | "shaky" | "shakily" | "hesitant" | "hesitantly"
-                | "shy" | "shyly" | "timid" | "timidly" | "embarrassed"
+                // Fear / Scared / Nervous / Stuttering / Agitated / Trembling / Shy / Worried
+                "fear" | "fearful" | "scared" | "terrified" | "frightened" | "afraid"
+                | "panicked" | "panic" | "agitated" | "agitatedly" | "nervous" | "nervously"
+                | "anxious" | "anxiously" | "worried" | "worriedly" | "concerned" | "uneasy"
+                | "stutter" | "stutters" | "stuttering" | "stammer" | "stammering"
+                | "trembling" | "trembling voice" | "quavering" | "shaky" | "shakily"
+                | "hesitant" | "hesitantly" | "uncertain" | "uncertainly" | "shy" | "shyly"
+                | "bashful" | "bashfully" | "timid" | "timidly" | "embarrassed" | "flustered"
                 | "urgent" | "urgently" | "desperate" | "desperately"
                 | "emotion-fear" | "emotion-anxious" | "emotion-nervous" | "emotion-panicked"
-                | "恐れ" | "怖" | "恐怖" => {
+                | "emotion-worried" | "emotion-shy" | "emotion-embarrassed"
+                | "恐れ" | "怖" | "恐怖" | "慌て" | "動揺" | "どもり" | "心配" | "照れ" => {
                     emotion_sliders.insert("fear".to_string(), 0.7);
                     emotion_cfg_scale = 1.2;
                 }
@@ -239,49 +299,57 @@ impl EmotionParser {
                     emotion_cfg_scale = 1.2;
                 }
 
-                // Sarcastic / Mocking / Smug / Cold / Dismissive
-                "sarcastic" | "sarcastically" | "sarcasm" | "ironic"
-                | "mocking" | "mockingly" | "smug" | "smugly"
-                | "cold" | "coldly" | "grim" | "grimly" | "dismissive" | "dismissively"
-                | "suspicious" | "suspiciously" | "style-sarcastic" | "style-mocking"
-                | "皮肉" => {
+                // Sarcastic / Mocking / Exasperated / Rolling eyes / Cold / Dismissive
+                "sarcastic" | "sarcastically" | "sarcasm" | "ironic" | "mocking" | "mockingly"
+                | "smug" | "smugly" | "smirk" | "scoff" | "scoffs" | "exasperated"
+                | "exasperatedly" | "rolling eyes" | "eye roll" | "cold" | "coldly" | "grim"
+                | "grimly" | "dismissive" | "dismissively" | "suspicious" | "suspiciously"
+                | "style-sarcastic" | "style-mocking" | "emotion-annoyed"
+                | "皮肉" | "呆れ" => {
                     emotion_sliders.insert("angry".to_string(), 0.3);
                     emotion_sliders.insert("sad".to_string(), 0.2);
                     emotion_cfg_scale = 1.15;
                     speed_factor = 0.95;
                 }
-                "dramatic" | "dramatic tone" | "solemn" | "solemnly" => {
+                "dramatic" | "dramatic tone" | "solemn" | "solemnly" | "echo" | "reverb" => {
                     emotion_sliders.insert("surprised".to_string(), 0.3);
                     emotion_sliders.insert("sad".to_string(), 0.2);
                     emotion_cfg_scale = 1.2;
                     speed_factor = 0.90;
                 }
-                "advertisement" | "commercial" | "sings" | "singing" | "style-singing" => {
+                "advertisement" | "commercial" | "sings" | "singing" | "hum" | "humming"
+                | "style-singing" | "style-hum" | "鼻歌" => {
                     emotion_sliders.insert("happy".to_string(), 0.4);
                     emotion_cfg_scale = 1.15;
                     speed_factor = 1.05;
                 }
                 "narration" | "narrator" | "calm" | "calmly" | "serious" | "seriously"
-                | "thoughtful" | "thoughtfully" | "determined" | "relieved"
-                | "deadpan" | "monotone" | "confused"
-                | "emotion-calm" | "emotion-relieved" | "style-narration" => {
+                | "thoughtful" | "thoughtfully" | "determined" | "relieved" | "satisfied"
+                | "contentedly" | "deadpan" | "monotone" | "confused"
+                | "emotion-calm" | "emotion-relieved" | "style-narration"
+                | "安堵" | "満足" => {
                     // Calm and neutral reading
                     emotion_cfg_scale = 1.0;
                     speed_factor = 1.00;
                 }
-                "slowly" | "slow" | "deliberate" | "deliberately" | "prosody-slow" => {
+                "slowly" | "slow" | "deliberate" | "deliberately" | "prosody-slow"
+                | "ゆっくり" => {
                     // Explicit slow pacing requested by prompt
                     speed_factor = 0.75;
                 }
-                "quickly" | "quick" | "fast" | "rushed" | "hurried" | "hurriedly"
-                | "prosody-fast" => {
+                "quickly" | "quick" | "fast" | "rapid-fire" | "rushed" | "hurried"
+                | "hurriedly" | "prosody-fast" | "早口" => {
                     // Explicit fast pacing requested by prompt
                     speed_factor = 1.20;
                 }
 
                 // Pure sound/action tags (safely cleaned from text without altering emotion)
-                "clear throat" | "clears throat" | "cough" | "coughs" | "pause"
-                | "sneeze" | "sneezes" | "yawn" | "yawns" | "gulp" | "swallow" => {
+                "clear throat" | "clears throat" | "clearing throat" | "cough" | "coughs"
+                | "coughing" | "pause" | "silence" | "sneeze" | "sneezes" | "sneezing"
+                | "yawn" | "yawns" | "yawning" | "gulp" | "gulps" | "swallow" | "swallows"
+                | "tsk" | "tut" | "click tongue" | "tongue click" | "lip smack" | "lip noise"
+                | "kiss" | "smooch" | "lick" | "licking" | "chew" | "chewing" | "wet sound"
+                | "nod" | "agree" | "phone" | "telephone" => {
                     // Do not alter emotions; these are stripped from text so they won't be spoken aloud
                 }
 
