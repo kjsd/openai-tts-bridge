@@ -3,7 +3,7 @@ use clap::Parser;
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "openai-tts-bridge",
-    about = "High-performance OpenAI & Gradio-compatible TTS bridge supporting multiple engines (Zonos 2, Irodori-TTS)",
+    about = "High-performance OpenAI-compatible TTS bridge supporting multiple engines (Zonos 2, Irodori-TTS)",
     version
 )]
 pub struct Config {

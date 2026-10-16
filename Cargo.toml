@@ -1,9 +1,9 @@
 [package]
 name = "openai-tts-bridge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Kenji Minoura <minoru@kandj.org>", "Nina <nina@kandj.org>"]
-description = "High-performance Rust bridge providing an OpenAI & Gradio-compatible TTS API for multiple engines (Zonos 2, Irodori-TTS)"
+description = "High-performance Rust bridge providing an OpenAI-compatible TTS API for multiple engines (Zonos 2, Irodori-TTS)"
 license = "MIT"
 
 [dependencies]
@@ -23,10 +23,7 @@ md5 = "0.7"
 thiserror = "2.0"
 anyhow = "1.0"
 dotenvy = "0.15"
-uuid = { version = "1.10", features = ["v4"] }
 base64 = "0.22"
-tokio-stream = "0.1"
-async-stream = "0.3"
 async-trait = "0.1"
 
 [dev-dependencies]

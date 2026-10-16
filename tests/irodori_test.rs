@@ -2,15 +2,14 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use base64::Engine;
 use http_body_util::BodyExt;
+use openai_tts_bridge::{create_engine, create_router, AppState, Config};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-use openai_tts_bridge::{create_engine, create_router, AppState, Config};
-use base64::Engine;
 
 fn create_irodori_test_config(irodori_url: String) -> Config {
     Config {
@@ -240,7 +239,7 @@ async fn test_irodori_speech_with_custom_speaker_audio_upload() {
     let dummy_ref_audio = b"dummy_reference_voice_data_for_irodori";
     let dummy_b64 = base64::prelude::BASE64_STANDARD.encode(dummy_ref_audio);
     let expected_hash = format!("{:x}", md5::compute(dummy_ref_audio));
-    let expected_voice_id = format!("gradio_ref_{expected_hash}");
+    let expected_voice_id = format!("custom_ref_{expected_hash}");
 
     // 1. Mock voice upload endpoint: POST /v1/audio/voices -> 201 Created
     Mock::given(method("POST"))
@@ -302,7 +301,7 @@ async fn test_irodori_speech_with_custom_speaker_audio_cache_hit() {
     let dummy_ref_audio = b"cached_reference_voice_data";
     let dummy_b64 = base64::prelude::BASE64_STANDARD.encode(dummy_ref_audio);
     let expected_hash = format!("{:x}", md5::compute(dummy_ref_audio));
-    let expected_voice_id = format!("gradio_ref_{expected_hash}");
+    let expected_voice_id = format!("custom_ref_{expected_hash}");
 
     // 1. Mock voice upload endpoint returning 409 Conflict (already exists)
     Mock::given(method("POST"))
@@ -357,114 +356,13 @@ async fn test_irodori_speech_with_custom_speaker_audio_cache_hit() {
 }
 
 #[tokio::test]
-async fn test_irodori_gradio_generate_with_reference_voice_flow() {
-    let mock_server = MockServer::start().await;
-    let dummy_wav = make_dummy_wav();
-
-    // 1. Create a dummy reference voice file in temp directory (as if uploaded by Gradio)
-    let temp_voice_path = "/tmp/zonos_gradio_voices/skyrim_test_ref.wav";
-    let _ = tokio::fs::create_dir_all("/tmp/zonos_gradio_voices").await;
-    tokio::fs::write(temp_voice_path, b"skyrim_npc_voice_bytes").await.unwrap();
-
-    let expected_hash = format!("{:x}", md5::compute(b"skyrim_npc_voice_bytes"));
-    let expected_voice_id = format!("gradio_ref_{expected_hash}");
-
-    // 2. Mock Irodori upload endpoint: POST /v1/audio/voices -> 201 Created
-    Mock::given(method("POST"))
-        .and(path("/v1/audio/voices"))
-        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
-            "voice_id": expected_voice_id,
-            "path": format!("/voices/{expected_voice_id}.wav")
-        })))
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    // 3. Mock Irodori speech endpoint: POST /v1/audio/speech
-    let expected_voice_clone = expected_voice_id.clone();
-    Mock::given(method("POST"))
-        .and(path("/v1/audio/speech"))
-        .respond_with(move |req: &wiremock::Request| {
-            let body_json: Value = serde_json::from_slice(&req.body).unwrap();
-            assert_eq!(body_json["voice"].as_str().unwrap(), expected_voice_clone);
-            assert!(body_json["input"].as_str().unwrap().contains("👂")); // whisper translated
-
-            ResponseTemplate::new(200)
-                .set_body_bytes(dummy_wav.clone())
-                .insert_header("content-type", "audio/wav")
-        })
-        .expect(1)
-        .mount(&mock_server)
-        .await;
-
-    let config = create_irodori_test_config(mock_server.uri());
-    let engine = create_engine(&config).unwrap();
-    let state = Arc::new(AppState::with_engine(config, engine));
-    let app = create_router(state);
-
-    // 4. Gradio Chatterbox generate_audio call with speaker path
-    let req_body = json!({
-        "data": [
-            null,
-            "[whisper] こんにちは、ドヴァキン",
-            null,
-            { "path": temp_voice_path }
-        ]
-    });
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/gradio_api/call/generate_audio")
-                .method("POST")
-                .header("Content-Type", "application/json")
-                .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = response.into_body().collect().await.unwrap().to_bytes();
-    let res_json: Value = serde_json::from_slice(&body).unwrap();
-    let event_id = res_json["event_id"].as_str().unwrap();
-
-    // Give background task time to complete
-    tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-    // 5. Fetch generated audio
-    let out_file_path = format!("/tmp/zonos_gradio_voices/out_{event_id}.wav");
-    assert!(std::path::Path::new(&out_file_path).exists());
-
-    let file_uri = format!("/gradio_api/file={out_file_path}");
-    let file_resp = app
-        .oneshot(
-            Request::builder()
-                .uri(&file_uri)
-                .method("GET")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(file_resp.status(), StatusCode::OK);
-    assert_eq!(file_resp.headers().get("content-type").unwrap(), "audio/wav");
-
-    // Clean up
-    let _ = tokio::fs::remove_file(temp_voice_path).await;
-    let _ = tokio::fs::remove_file(out_file_path).await;
-}
-
-#[tokio::test]
 async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
     let mock_server = MockServer::start().await;
     let dummy_wav = make_dummy_wav();
     let skyrim_voice_id = "snv1-a1b2c3d4e5f6";
     let ref_wav_bytes = b"RIFF_skyrim_femaleeventoned_wav_bytes";
     let expected_hash = format!("{:x}", md5::compute(ref_wav_bytes));
-    let expected_irodori_voice_id = format!("gradio_ref_{expected_hash}");
+    let expected_irodori_voice_id = format!("custom_ref_{expected_hash}");
 
     // 1. Mock Irodori backend voice upload
     Mock::given(method("POST"))
@@ -579,4 +477,3 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
         "conspiratorial"
     );
 }
-

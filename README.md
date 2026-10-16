@@ -3,13 +3,13 @@
 [![Rust](https://img.shields.io/badge/rust-2024%20edition-orange.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A high-performance, modular **OpenAI-compatible & Gradio 4 (Chatterbox) TTS proxy bridge** written in Rust.
+A high-performance, modular **OpenAI-compatible TTS proxy bridge** written in Rust.
 
-It seamlessly bridges **SkyrimNet** (both the native **OpenAI-Compatible TTS** client in `vbeta27+` and the legacy **Chatterbox / Gradio** client) as well as standard **OpenAI TTS clients** (Open WebUI, AnythingLLM, Elixir clients, etc.) with state-of-the-art TTS engines using a plugin-based architecture.
+It seamlessly bridges **OpenAI TTS clients** (**SkyrimNet `vbeta27+`**, `nina_agent`, `kitt_agent`, Open WebUI, AnythingLLM, etc.) with state-of-the-art local TTS engines using a plugin-based architecture.
 
 Supported engines:
-- **Aratako Irodori-TTS**: Expressive Japanese TTS controlled via inline Unicode style emojis (`👂`, `😮‍💨`, `🤭`, `😊`, `😡`, `😭`, `😰`, `🫶`, `😏`, etc.) and zero-shot reference audio cloning.
-- **Zyphra Zonos 2**: High-dimensional emotion vectors, speaking-rate conditioning, zero-shot voice cloning, and ultra-fast 32-bit float to 16-bit PCM WAV conversion.
+- **Aratako Irodori-TTS**: Expressive Japanese TTS controlled via inline Unicode style emojis (`👂`, `😮‍💨`, `🤭`, `😊`, `😡`, `😭`, `😱`, etc.).
+- **Zyphra Zonos 2**: High-dimensional emotion vectors, speaking-rate conditioning, and ultra-fast 32-bit float to 16-bit PCM WAV conversion.
 
 ---
 
@@ -18,85 +18,96 @@ Supported engines:
 - **Modular Plugin Engine Architecture**:
   - Switch TTS backends seamlessly via environment variable (`TTS_ENGINE=irodori` or `TTS_ENGINE=zonos2`).
   - Extensible `TtsEngine` trait allows adding new speech synthesis engines easily.
-- **Full SkyrimNet OpenAI-Compatible TTS Support (`vbeta27+`)**:
-  - **Zero-Shot Voice Auto-Enrollment (`POST /v1/audio/voices`)**: Accepts `multipart/form-data` uploads (`title`, `ref_audio`, `ref_text`) from SkyrimNet's `OpenAICompatibleTTSInterface`, automatically registering local NPC `.wav` files (e.g. `femaleeventoned.wav`) without manual pre-registration on the server.
-  - **Automatic Re-Enrollment on Restart (`404 voice_not_found`)**: When the bridge restarts and receives a synthesis request for a previously cached `snv1-<hash>` voice ID, it returns `HTTP 404` with `{"error": {"code": "voice_not_found"}}`, prompting SkyrimNet to automatically re-upload the reference `.wav` and retry synthesis transparently.
-- **Dual API Compatibility**:
-  - **OpenAI Speech & Voice API**: Implements `POST /v1/audio/speech`, `POST /v1/audio/voices`, and `GET /v1/models`.
-  - **Gradio 4 (Chatterbox) API**: Emulates Gradio 4 endpoints used by legacy SkyrimNet Chatterbox (`POST /gradio_api/upload`, `POST /gradio_api/call/generate_audio`, SSE event stream, and `/gradio_api/file={path}`).
-  - **XTTS / SkyrimNet Routes**: Provides `/speakers`, `/speakers_list`, `/get_speakers`, and `/languages` endpoints.
-- **Smart Emotion & Audio Tag Transformation (138+ SkyrimNet Carry Tags)**:
-  - Supports all **11 `carry_tags_*.yaml` categories (138 tags)** from SkyrimNet `vbeta27+` (`anger`, `body`, `composure`, `fear`, `joy`, `manner`, `pace`, `sorrow`, `style`, `urgency`, `volume`), `0650_audio_tags.prompt` vocalizations, Higgs-style tags (`emotion-*`, `style-*`, `prosody-*`, `sfx-*`), and `<SE>...</SE>` wrapper stripping.
-  - Resilient parser rescues SkyrimNet sentence-boundary split anomalies (e.g. `chuckle] Hello` or `[whisper Hello`).
-  - **Engine-specific conversion**:
-    - **Irodori-TTS**: Transforms tags directly into all **36 official Irodori Unicode style emojis** inline; safely strips unknown or non-vocalizable tags.
-    - **Zonos 2**: Converts tags into multidimensional emotion slider vectors, CFG scales, and pacing multipliers; safely strips tags from speakable text.
-- **Dynamic Speaking-Rate Conditioning**:
-  - Calibrates pacing dynamically based on emotion and configuration (`DEFAULT_SPEED=1.15` for Zonos2, customizable per request).
-- **Zero-Loss Ultra-Fast Audio Conversion**:
-  - Converts raw 32-bit float PCM into standard **16-bit signed integer RIFF WAVE** (`Format 1`, 44.1kHz Mono) with clipping protection.
-- **Concurrency & Resource Safety**:
-  - Built-in async mutex queue serializes backend inference requests, preventing GPU VRAM spikes and collisions.
-  - Enforces body size limits (`MAX_BODY_SIZE_MB`, default 100MB) for reference audio uploads.
-- **Self-Contained Binary**: Zero runtime dependencies (no Python or Node.js required to run the bridge).
+- **OpenAI Speech & Zero-Shot Voice Enrollment API**:
+  - **Speech Synthesis (`POST /v1/audio/speech`)**: Standard OpenAI TTS JSON payload (`model`, `input`, `voice`, `speed`, `response_format`) plus optional `speaker_audio_base64`.
+  - **Zero-Shot Voice Enrollment (`POST /v1/audio/voices`)**: Supports SkyrimNet `OpenAICompatibleTTSInterface` automatic multipart voice uploading (`ref_audio`, `title` / `voice_id`, `ref_text`) and automatic re-enrollment recovery (`HTTP 404` with `error.code = "voice_not_found"`) across both **Irodori-TTS** and **Zonos 2**.
+  - **Models & Health (`GET /v1/models`, `GET /health`)**: Standard OpenAI model discovery and backend health status.
+- **Full SkyrimNet `vbeta27+` Audio & Emotion Tag Support (138+ Tags)**:
+  - Supports all **138 tags** from SkyrimNet's `carry_tags_*.yaml` (`emotion`, `inflection`, `pacing`, `vocal_quality`, `volume`, `nonverbal`), legacy `0650_audio_tags.prompt` tags, and Higgs-style tags.
+  - Automatically strips `<SE>` / `</SE>` sound-effect wrappers generated by LLMs.
+  - Automatically repairs broken LLM tag outputs (such as missing opening brackets like `chuckle] Hello` or punctuation-split tags like `[whisper。]`).
+  - **Irodori Engine (`TTS_ENGINE=irodori`)**: Translates tags inline into all 36 official Aratako Irodori-TTS-500M-v2 style emojis (`👂`, `😮‍💨`, `🤭`, `😆`, `😊`, `😡`, `😭`, `😱`, `😒`, `🥱`, `🤧`, `🌬️`, `⏸️`, `⏩`, `🐢`, `📢`, `📉`, `📈`, `🤖`, `💪`, `🙏`, `👑`, `😎`, `🧸`, etc.).
+  - **Zonos 2 Engine (`TTS_ENGINE=zonos2`)**: Extracts tags into clean text and maps them to multidimensional emotion sliders (`happy`, `sad`, `angry`, `surprised`, `fear`, `disgust`), CFG scale, and speaking rate multipliers.
+- **Ultra-Fast Audio Conversion**:
+  - Converts Zonos 2's raw 32-bit IEEE float PCM stream into standard 16-bit integer PCM WAV (`RIFF WAVE`, 44.1kHz, Mono) in memory with `< 1ms` overhead.
 
 ---
 
-## 🎭 Emotion & Audio Tag Mapping Matrix
+## 🏗️ Architecture
 
-The bridge parses inline tags in brackets `[...]`, `【...】`, `(...)`, or `*...*` (and strips `<SE>` / `</SE>` wrappers).
+```mermaid
+flowchart LR
+    subgraph Clients
+        SkyrimOpenAI[SkyrimNet vbeta27+<br/>OpenAI TTS Client]
+        OpenAI[nina_agent / kitt_agent<br/>Open WebUI / cURL]
+    end
 
-| Category / Tags (Examples) | Expression | Zonos 2 Mapping | Irodori-TTS Emoji |
-| :--- | :--- | :--- | :--- |
-| `[whisper]`, `[whispering]`, `[hushed]`, `[quietly]`, `[murmuring]`, `[conspiratorial]` | Whisper / Soft Ear-level | `happy: 0.2`, `cfg: 1.1`, speed 0.88x | `👂` |
-| `[gentle]`, `[gently]`, `[tender]`, `[warmly]`, `[seductive]`, `[sultry]`, `[flirtatious]` | Gentle / Tender / Warm | `happy: 0.2`, `cfg: 1.1`, speed 0.88x | `🫶` |
-| `[sigh]`, `[tired]`, `[exhausted]`, `[weary]`, `[resigned]`, `[bored]` | Sigh / Weary / Resigned | `sad: 0.6`, `cfg: 1.15`, speed 0.90x | `😮‍💨` |
-| `[pant]`, `[breathless]`, `[breathlessly]` | Shortness of breath / Panting | `surprised: 0.6`, `fear: 0.3` | `🌬️` |
-| `[chuckle]`, `[giggle]`, `[snicker]`, `【くすくす】` | Chuckle / Suppressed Laugh | `happy: 0.5`, `cfg: 1.15` | `🤭` |
-| `[happy]`, `[happily]`, `[cheerful]`, `[joyful]`, `[hopeful]`, `[proud]`, `[confident]` | Joy / Happy / Proud | `happy: 0.7`, `cfg: 1.2` | `😊` |
-| `[laugh]`, `[laughter]`, `[excited]`, `[excitedly]` | Excited / Loud Laughter | `happy: 0.8`, `cfg: 1.2`, speed 1.10x | `😆` |
-| `[angry]`, `[furious]`, `[frustrated]`, `[impatient]`, `[shout]`, `[yell]`, `[menacing]`, `[stern]` | Anger / Shout / Commanding | `angry: 0.75`, `cfg: 1.2`, speed 1.15x | `😡` |
-| `[sad]`, `[sorrowful]`, `[mournful]`, `[grieving]`, `[melancholy]`, `[tearful]`, `[crying]`, `[sob]` | Sad / Crying / Sorrow | `sad: 0.7`, `cfg: 1.2`, speed 0.90x | `😭` |
-| `[trembling]`, `[shaky]`, `[timid]`, `[weak]`, `[hesitant]` | Trembling / Timid / Weak | `fear: 0.7`, `cfg: 1.2` | `🥺` |
-| `[fear]`, `[scared]`, `[terrified]`, `[panicked]`, `[nervous]`, `[anxious]`, `[urgent]`, `[desperate]` | Fear / Panicked / Urgent | `fear: 0.7`, `cfg: 1.2` | `😰` |
-| `[surprised]`, `[shocked]`, `[gasp]` | Surprise / Shock / Gasp | `surprised: 0.7`, `cfg: 1.2` | `😲` |
-| `[pained]`, `[strained]`, `[hoarse]`, `[distress]` | Distressed / In Pain | `sad: 0.5`, `angry: 0.3`, speed 0.90x | `😖` |
-| `[worried]`, `[uneasy]` | Worried / Uneasy | `fear: 0.7`, `cfg: 1.2` | `😟` |
-| `[annoyed]`, `[exasperated]`, `[cold]`, `[grim]`, `[deadpan]`, `[monotone]`, `[dismissive]` | Annoyed / Cold / Dismissive | `angry: 0.3`, `sad: 0.2`, speed 0.95x | `🙄` |
-| `[sarcastic]`, `[mocking]`, `[smug]`, `[playful]`, `[teasing]` | Sarcasm / Teasing / Smirk | `angry: 0.3`, `sad: 0.2`, speed 0.95x | `😏` |
-| `[shy]`, `[shyly]`, `[embarrassed]` | Shy / Bashful | `fear: 0.7`, `cfg: 1.2` | `🫣` |
-| `[relieved]`, `[calm]`, `[serious]`, `[solemn]`, `[determined]`, `[narration]` | Calm / Relieved / Solemn | Neutral (`cfg: 1.0`, speed 1.00x) | `😌` |
-| `[sleepy]`, `[drowsy]` | Sleepy / Sluggish | `sad: 0.6`, speed 0.90x | `😴` |
-| `[yawn]` | Yawn | Stripped from spoken text | `🥱` |
-| `[pleading]`, `[plead]`, `[beg]` | Pleading / Begging | `sad: 0.7`, speed 0.90x | `🙏` |
-| `[drunk]`, `[drunkenly]` | Drunk | `sad: 0.5`, speed 0.90x | `🥴` |
-| `[thoughtful]`, `[curious]`, `[confused]`, `[suspicious]` | Thoughtful / Curious | `surprised: 0.7` / Neutral | `🤔` |
-| `[groan]`, `[moan]` | Groan / Heavy Breathing | `sad: 0.5`, `angry: 0.3`, speed 0.90x | `🥵` |
-| `[clear throat]`, `[cough]`, `[sniff]`, `[sneeze]` | Throat-clearing / Cough / Sniff | Stripped / `sad: 0.5` | `🤧` |
-| `[dramatic]`, `[dramatic tone]`, `[advertisement]` | Dramatic / Loudspeaker | `surprised: 0.3`, `sad: 0.2` | `📢` |
-| `[sings]`, `[singing]`, `[humming]` | Singing / Humming | `happy: 0.4`, speed 1.05x | `🎵` |
-| `[pause]` | Silence / Beat | Stripped from spoken text | `⏸️` |
-| `[slowly]`, `[deliberate]`, `[deliberately]` | Slow pacing | Speed 0.75x | `🐢` |
-| `[quickly]`, `[rushed]`, `[hurried]`, `[hurriedly]` | Fast pacing | Speed 1.20x | `⏩` |
+    subgraph Bridge [openai-tts-bridge :8080]
+        Router[Axum Router<br/>/v1/audio/speech<br/>/v1/audio/voices]
+        VoiceStore[In-Memory Voice Store<br/>Zero-Shot Auto Enrollment]
+        Trait[TtsEngine Trait]
+        ZonosMod[ZonosEngine<br/>EmotionParser + WAV Conv]
+        IrodoriMod[IrodoriEngine<br/>IrodoriMapper Emoji + Voice Hash]
+    end
+
+    subgraph Backends [TTS Backends]
+        ZonosServer[Zonos 2 FastAPI<br/>:1919]
+        IrodoriServer[Irodori-TTS-Server<br/>:8088]
+    end
+
+    SkyrimOpenAI -->|POST /v1/audio/voices<br/>POST /v1/audio/speech| Router
+    OpenAI -->|POST /v1/audio/speech| Router
+    Router <--> VoiceStore
+    Router --> Trait
+    Trait -->|TTS_ENGINE=zonos2| ZonosMod
+    Trait -->|TTS_ENGINE=irodori| IrodoriMod
+    ZonosMod -->|POST /tts/generate| ZonosServer
+    IrodoriMod -->|POST /v1/audio/voices<br/>POST /v1/audio/speech| IrodoriServer
+```
 
 ---
 
-## ⚙️ Configuration
+## 🎭 Audio & Emotion Tag Mapping
 
-Options can be configured via command-line arguments or environment variables:
+Both `[tag]`, `(tag)`, and `*tag*` notations (as well as `<SE>[tag]</SE>`) are supported:
 
-| Argument | Environment Variable | Default | Description |
+| Category | Representative Tags (`carry_tags_*.yaml` & Legacy) | Irodori Emoji | Zonos 2 Mapping |
+| :--- | :--- | :---: | :--- |
+| **Whisper / Secret** | `whisper`, `whispering`, `conspiratorial`, `hushed`, `murmur`, `mutter`, `under breath` | `👂` | `speed: 0.85`, `happy: 0.2`, `cfg: 1.3` |
+| **Sigh / Relief** | `sigh`, `exhale`, `relieved`, `resigned`, `tired`, `exhausted`, `world-weary`, `defeated` | `😮‍💨` | `sad: 0.6`, `speed: 0.9`, `cfg: 1.5` |
+| **Chuckle / Teasing** | `chuckle`, `giggle`, `snicker`, `smirk`, `playfully`, `teasing`, `coy`, `wry`, `sly`, `amused` | `🤭` | `happy: 0.7`, `cfg: 1.5` |
+| **Laugh / Cackle** | `laugh`, `laughter`, `cackle`, `guffaw`, `cheerful`, `jovial`, `gleeful`, `ecstatic` | `😆` | `happy: 0.85`, `cfg: 1.6` |
+| **Happy / Warm** | `happy`, `warm`, `warmly`, `gentle`, `softly`, `tender`, `affectionate`, `loving`, `kindly`, `smiling` | `😊` | `happy: 0.6`, `speed: 0.92`, `cfg: 1.4` |
+| **Angry / Hostile** | `angry`, `furious`, `hostile`, `enraged`, `snarl`, `growl`, `seething`, `bitter`, `threatening`, `stern` | `😡` | `angry: 0.8`, `speed: 1.05`, `cfg: 1.6` |
+| **Sad / Crying** | `sad`, `cry`, `sob`, `weep`, `sniffle`, `whimper`, `heartbroken`, `grief`, `mournful`, `hurt`, `remorseful` | `😭` / `😢` | `sad: 0.8`, `speed: 0.88`, `cfg: 1.6` |
+| **Fear / Panic** | `scared`, `fearful`, `terrified`, `panicked`, `trembling`, `shaky`, `scream`, `shriek`, `anxious`, `nervous` | `😱` / `😨` | `fear: 0.8`, `surprised: 0.4`, `speed: 1.1`, `cfg: 1.6` |
+| **Surprise / Gasp** | `surprised`, `shocked`, `amazed`, `astonished`, `stunned`, `gasp`, `startled`, `incredulous` | `😲` | `surprised: 0.8`, `cfg: 1.5` |
+| **Disgust / Scorn** | `disgusted`, `scoff`, `sneer`, `contemptuous`, `disdainful`, `repulsed`, `dismissive`, `patronizing` | `😒` / `🤢` | `disgust: 0.8`, `angry: 0.3`, `cfg: 1.5` |
+| **Groan / Yawn** | `groan`, `grunt`, `strain`, `pain`, `wounded` / `yawn`, `sleepy`, `drowsy`, `bored` | `😩` / `🥱` | `sad: 0.5`, `disgust: 0.4` / `speed: 0.82` |
+| **Cough / Sneeze** | `cough`, `clearing throat`, `clear throat`, `sneeze`, `hiccup`, `choke` | `🤧` | Removed from spoken text |
+| **Breath / Pant** | `pant`, `inhale`, `breath`, `deep breath`, `breathless`, `out of breath`, `winded`, `raspy`, `hoarse` | `🌬️` / `😮` | `fear: 0.3`, `speed: 1.15` |
+| **Pacing / Speed** | `slow`, `slowly`, `deliberate`, `measured`, `hesitant`, `uncertain` / `fast`, `rushed`, `urgent`, `hurried` | `🐢` / `⏩` / `⏸️` | `speed: 0.82` / `speed: 1.18` |
+| **Volume / Tone** | `shouting`, `yelling`, `loud`, `booming`, `bellowing` / `quiet`, `faint` / `monotone`, `deadpan`, `flat` | `📢` / `🤖` / `📉` / `📈` | Mapped to intensity & rate |
+| **Character / Role** | `proud`, `regal`, `haughty`, `commanding` / `confident`, `smug` / `pleading`, `begging`, `desperate` | `👑` / `😎` / `🙏` / `💪` | Mapped to corresponding emotions |
+
+---
+
+## 🛠️ Configuration
+
+All options can be configured via CLI arguments or environment variables (or a `.env` file):
+
+| CLI Flag | Env Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--tts-engine` | `TTS_ENGINE` | `zonos2` | Engine to use: `irodori` or `zonos2` |
-| `--host` | `HOST` | `0.0.0.0` | Host address to bind bridge server to |
-| `-p, --port` | `PORT` | `8080` | Port to listen on |
-| `--irodori-url` | `IRODORI_URL` | `http://127.0.0.1:8088` | Base URL of Irodori-TTS server |
-| `--irodori-model` | `IRODORI_MODEL` | `irodori-tts` | Model identifier for Irodori-TTS |
-| `--zonos-url` | `ZONOS_URL` | `http://127.0.0.1:1919` | Base URL of Zonos 2 FastAPI server |
-| `--default-voice` | `DEFAULT_VOICE` | `default` | Fallback speaker identifier |
-| `--default-model` | `DEFAULT_MODEL` | `zonos2` | Fallback model name |
-| `--default-speed` | `DEFAULT_SPEED` | `1.15` | Base speech speed multiplier for Zonos 2 |
-| `--max-body-size-mb` | `MAX_BODY_SIZE_MB` | `100` | Max request body size in MB |
+| `--tts-engine` | `TTS_ENGINE` | `zonos2` | Backend engine to use: `zonos2` or `irodori` |
+| `--host` | `HOST` | `0.0.0.0` | Bind address |
+| `--port` | `PORT` | `8000` | Listen port |
+| `--zonos-url` | `ZONOS_URL` | `http://127.0.0.1:1919` | Zonos 2 FastAPI server base URL |
+| `--irodori-url` | `IRODORI_URL` | `http://127.0.0.1:8088` | Irodori-TTS-Server base URL |
+| `--irodori-model` | `IRODORI_MODEL` | `irodori-tts` | Model identifier sent to Irodori-TTS |
+| `--default-voice` | `DEFAULT_VOICE` | `default` | Fallback speaker/voice ID when none is provided |
+| `--default-model` | `DEFAULT_MODEL` | `zonos2` | Default model name advertised in `/v1/models` |
+| `--default-speed` | `DEFAULT_SPEED` | `1.15` | Base speech speed multiplier (used by Zonos 2) |
+| `--max-body-size-mb` | `MAX_BODY_SIZE_MB` | `100` | Max HTTP request payload size in MB |
 | `--log-level` | `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 
 ---
@@ -111,7 +122,7 @@ cd openai-tts-bridge
 cargo build --release
 ```
 
-The optimized binary will be produced at `target/release/openai-tts-bridge` (~8MB).
+The optimized binary will be produced at `target/release/openai-tts-bridge`.
 
 ### 2. Run with Irodori-TTS Backend (Recommended for SkyrimNet)
 
@@ -141,7 +152,7 @@ To run `openai-tts-bridge` as a background daemon on a Linux server:
 
 ```ini
 [Unit]
-Description=OpenAI & Gradio TTS Bridge Server
+Description=OpenAI-Compatible TTS Bridge Server
 After=network.target
 
 [Service]
@@ -181,22 +192,15 @@ journalctl -u openai-tts-bridge -f
 
 ## 📡 Client Setup & Integration
 
-### 1. SkyrimNet (`vbeta27+` OpenAI-Compatible TTS - Recommended)
+### 1. SkyrimNet (`vbeta27+` OpenAI-Compatible TTS)
 
 In SkyrimNet configuration:
 - **TTS Method**: `OpenAI TTS` (`openai`)
-- **Endpoint URL**: `http://<server-ip>:8080` (or `/v1/audio/speech`)
+- **Endpoint URL**: `http://<server-ip>:8080/v1/audio/speech`
 - **Service Profile**: `self_hosted` (skips unnecessary reference audio STT)
 - **Zero-Shot Voice Cloning**: SkyrimNet automatically uploads local NPC `.wav` files (such as `femaleeventoned.wav` or custom voices) to `POST /v1/audio/voices` and synthesizes speech via `POST /v1/audio/speech` with `snv1-<sha256>` voice IDs. If `openai-tts-bridge` restarts, it responds with `404 voice_not_found`, and SkyrimNet automatically re-enrolls the `.wav` on the fly.
 
-### 2. SkyrimNet (Legacy Chatterbox / Gradio 4 Client)
-
-In SkyrimNet configuration:
-- **TTS Engine**: `Chatterbox` (or `Gradio 4`)
-- **Server Address**: `http://<server-ip>:8080`
-- Character reference voices uploaded by SkyrimNet via Gradio (`/gradio_api/upload`) are automatically processed, converted, and synthesized.
-
-### 3. Standard OpenAI Client (cURL)
+### 2. Standard OpenAI Client (cURL)
 
 ```bash
 # 1. Optional: Enroll a custom zero-shot reference voice
@@ -216,7 +220,7 @@ curl -X POST http://localhost:8080/v1/audio/speech \
   --output speech.wav
 ```
 
-### 4. Health & Models API
+### 3. Health & Models API
 
 ```bash
 # Health check (includes backend engine status)
@@ -241,7 +245,7 @@ Includes comprehensive tests for:
 - Emotion parser and malformed tag recovery (missing brackets, punctuation split anomalies, `<SE>` wrapper stripping).
 - Irodori emoji mapper conversions covering all 36 official styles and 138+ SkyrimNet `carry_tags_*.yaml` tags.
 - SkyrimNet OpenAI-compatible zero-shot voice enrollment (`POST /v1/audio/voices`) and automatic `404 voice_not_found` re-enrollment flows for both Irodori and Zonos 2.
-- Full end-to-end OpenAI API speech synthesis and Gradio 4 upload/generation flows with mocked backends.
+- Full end-to-end OpenAI API speech synthesis with mocked backends.
 
 ---
 

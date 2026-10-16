@@ -64,7 +64,7 @@ impl TtsEngine for IrodoriEngine {
         // 3. Resolve user speed factor
         let final_speed = req.speed.unwrap_or(1.0).clamp(0.25, 4.0);
 
-        // 4. Resolve custom reference audio if provided (e.g. from Gradio or OpenAI API)
+        // 4. Resolve custom reference audio if provided (from enrolled voice or speaker_audio_base64)
         let raw_custom_bytes: Option<Vec<u8>> = if let Some(ref bytes) = req.custom_speaker_audio_bytes {
             if !bytes.is_empty() {
                 Some(bytes.clone())
@@ -84,7 +84,7 @@ impl TtsEngine for IrodoriEngine {
 
         let (resolved_voice, has_custom_audio) = if let Some(bytes) = raw_custom_bytes {
             let hash = format!("{:x}", md5::compute(&bytes));
-            let dynamic_voice_id = format!("gradio_ref_{hash}");
+            let dynamic_voice_id = format!("custom_ref_{hash}");
             self.client.upload_voice_if_needed(&dynamic_voice_id, bytes).await?;
             (dynamic_voice_id, true)
         } else {
