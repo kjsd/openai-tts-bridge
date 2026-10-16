@@ -192,6 +192,8 @@ pub async fn handle_speech(
         ));
     }
 
+    let engine = state.resolve_engine(payload.model.as_deref())?;
+
     let custom_b64 = payload
         .speaker_audio_base64
         .or(payload.speaker_wav_base64)
@@ -225,7 +227,7 @@ pub async fn handle_speech(
         response_format: payload.response_format,
     };
 
-    let result = state.engine.synthesize(req).await?;
+    let result = engine.synthesize(req).await?;
 
     let tags_header = result.detected_tags.join(", ");
     let response = (

@@ -2,6 +2,7 @@ use crate::engine::irodori::types::IrodoriSpeechRequest;
 use crate::error::AppError;
 use bytes::Bytes;
 use reqwest::Client;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -13,6 +14,8 @@ pub struct IrodoriClient {
     base_url: String,
     // Concurrency guard to serialize GPU execution if needed
     lock: Arc<Mutex<()>>,
+    // Track voice IDs already uploaded to Irodori-TTS-Server to avoid redundant multipart uploads
+    uploaded_voices: Arc<Mutex<HashSet<String>>>,
 }
 
 impl IrodoriClient {
@@ -27,7 +30,12 @@ impl IrodoriClient {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
             lock: Arc::new(Mutex::new(())),
+            uploaded_voices: Arc::new(Mutex::new(HashSet::new())),
         }
+    }
+
+    pub async fn invalidate_voice(&self, voice_id: &str) {
+        self.uploaded_voices.lock().await.remove(voice_id);
     }
 
     /// Calls Irodori-TTS-Server /v1/audio/speech and returns audio bytes (WAV).
@@ -81,12 +89,20 @@ impl IrodoriClient {
     }
 
     /// Uploads custom reference audio bytes to Irodori-TTS-Server (/v1/audio/voices).
-    /// If the voice already exists (HTTP 409 Conflict), it is reused as a cache hit.
+    /// Skips upload if already uploaded in this session, or if the server returns HTTP 409 Conflict.
     pub async fn upload_voice_if_needed(
         &self,
         voice_id: &str,
         audio_bytes: Vec<u8>,
     ) -> Result<String, AppError> {
+        {
+            let cache = self.uploaded_voices.lock().await;
+            if cache.contains(voice_id) {
+                debug!(voice_id = %voice_id, "Reference voice already uploaded in session, skipping POST /v1/audio/voices");
+                return Ok(voice_id.to_string());
+            }
+        }
+
         let url = format!("{}/v1/audio/voices", self.base_url);
         debug!(url = %url, voice_id = %voice_id, bytes_len = audio_bytes.len(), "Uploading reference voice to Irodori");
 
@@ -108,11 +124,13 @@ impl IrodoriClient {
             .map_err(|e| AppError::EngineError(format!("Failed to upload voice to Irodori-TTS: {e}")))?;
 
         let status = response.status();
-        if status == reqwest::StatusCode::CREATED {
+        if status == reqwest::StatusCode::CREATED || status == reqwest::StatusCode::OK {
             info!(voice_id = %voice_id, "Reference voice registered on Irodori-TTS server");
+            self.uploaded_voices.lock().await.insert(voice_id.to_string());
             Ok(voice_id.to_string())
         } else if status == reqwest::StatusCode::CONFLICT {
             debug!(voice_id = %voice_id, "Reference voice already cached on Irodori-TTS server");
+            self.uploaded_voices.lock().await.insert(voice_id.to_string());
             Ok(voice_id.to_string())
         } else {
             let error_body = response

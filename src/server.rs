@@ -36,18 +36,21 @@ pub fn create_router(state: Arc<AppState>) -> Router {
 }
 
 pub async fn run_server(config: Config) -> anyhow::Result<()> {
-    let engine = create_engine(&config)?;
+    // Validate default engine configuration at startup
+    let default_engine = create_engine(&config)?;
     let bind_addr = format!("{}:{}", config.host, config.port);
 
     info!(
         addr = %bind_addr,
-        engine = %engine.name(),
+        default_engine = %default_engine.name(),
+        irodori_url = %config.irodori_url,
+        zonos_url = %config.zonos_url,
         default_voice = %config.default_voice,
-        default_model = %engine.default_model(),
-        "Starting openai-tts-bridge server"
+        default_model = %default_engine.default_model(),
+        "Starting openai-tts-bridge server (multi-engine dynamic routing enabled)"
     );
 
-    let state = Arc::new(AppState::with_engine(config.clone(), engine));
+    let state = Arc::new(AppState::with_engine(config.clone(), default_engine));
     let app = create_router(state);
 
     let listener = TcpListener::bind(&bind_addr).await?;

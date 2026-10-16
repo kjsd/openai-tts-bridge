@@ -82,10 +82,12 @@ impl TtsEngine for IrodoriEngine {
             None
         };
 
-        let (resolved_voice, has_custom_audio) = if let Some(bytes) = raw_custom_bytes {
-            let hash = format!("{:x}", md5::compute(&bytes));
+        let (resolved_voice, has_custom_audio) = if let Some(ref bytes) = raw_custom_bytes {
+            let hash = format!("{:x}", md5::compute(bytes));
             let dynamic_voice_id = format!("custom_ref_{hash}");
-            self.client.upload_voice_if_needed(&dynamic_voice_id, bytes).await?;
+            self.client
+                .upload_voice_if_needed(&dynamic_voice_id, bytes.clone())
+                .await?;
             (dynamic_voice_id, true)
         } else {
             (voice.to_string(), false)
@@ -106,14 +108,25 @@ impl TtsEngine for IrodoriEngine {
         let irodori_req = IrodoriSpeechRequest {
             model: self.config.irodori_model.clone(),
             input: mapped.prompt_text.clone(),
-            voice: Some(resolved_voice),
+            voice: Some(resolved_voice.clone()),
             response_format: Some("wav".to_string()),
             speed: Some(final_speed),
             irodori: None,
         };
 
-        // 6. Call Irodori backend
-        let audio_bytes = self.client.generate_wav(&irodori_req).await?;
+        // 6. Call Irodori backend (with automatic re-upload if Irodori-TTS-Server restarted)
+        let audio_bytes = match self.client.generate_wav(&irodori_req).await {
+            Ok(bytes) => bytes,
+            Err(AppError::VoiceNotFound(_)) if raw_custom_bytes.is_some() => {
+                let bytes = raw_custom_bytes.unwrap();
+                self.client.invalidate_voice(&resolved_voice).await;
+                self.client
+                    .upload_voice_if_needed(&resolved_voice, bytes)
+                    .await?;
+                self.client.generate_wav(&irodori_req).await?
+            }
+            Err(e) => return Err(e),
+        };
 
         Ok(SynthesisResult {
             audio_bytes: audio_bytes.to_vec(),
