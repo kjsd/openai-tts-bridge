@@ -57,6 +57,10 @@ impl IrodoriClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
+            if status == reqwest::StatusCode::NOT_FOUND {
+                let missing_voice = req.voice.clone().unwrap_or_else(|| "unknown".to_string());
+                return Err(AppError::VoiceNotFound(missing_voice));
+            }
             return Err(AppError::EngineError(format!(
                 "Irodori-TTS returned error (HTTP {status}): {error_body}"
             )));

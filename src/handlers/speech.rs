@@ -29,6 +29,19 @@ pub struct SpeechRequest {
     pub seed: Option<i64>,
 }
 
+/// Checks if a voice identifier matches SkyrimNet's dynamic voice ID conventions:
+/// - `snv1-<sha256>` (content-addressed hash ID)
+/// - `voice:<editorId>` (e.g., `voice:malebrute`, `voice:femaleeventoned`)
+/// - `actor:<formId>`, `fallback:<gender>`, `stored:<name>`, `test:<id>`
+fn is_skyrimnet_voice_id(v: &str) -> bool {
+    v.starts_with("snv1-")
+        || v.starts_with("voice:")
+        || v.starts_with("actor:")
+        || v.starts_with("fallback:")
+        || v.starts_with("stored:")
+        || v.starts_with("test:")
+}
+
 /// POST /v1/audio/voices
 /// Supports SkyrimNet OpenAI-compatible voice enrollment (`title`, `ref_audio`, `ref_text`)
 /// as well as Irodori-style enrollment (`voice_id`, `file`).
@@ -36,7 +49,8 @@ pub async fn handle_upload_voice(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), AppError> {
-    let mut voice_id: Option<String> = None;
+    let mut explicit_voice_id: Option<String> = None;
+    let mut title_field: Option<String> = None;
     let mut audio_bytes: Option<Vec<u8>> = None;
     let mut fallback_filename: Option<String> = None;
 
@@ -47,14 +61,24 @@ pub async fn handle_upload_voice(
     {
         let field_name = field.name().unwrap_or("").to_string();
         match field_name.as_str() {
-            "title" | "voice_id" | "name" => {
+            "voice_id" | "name" => {
                 let text = field
                     .text()
                     .await
                     .map_err(|e| AppError::BadRequest(format!("Failed to read {field_name}: {e}")))?;
                 let trimmed = text.trim();
                 if !trimmed.is_empty() {
-                    voice_id = Some(trimmed.to_string());
+                    explicit_voice_id = Some(trimmed.to_string());
+                }
+            }
+            "title" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("Failed to read title: {e}")))?;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    title_field = Some(trimmed.to_string());
                 }
             }
             "ref_audio" | "file" | "audio" => {
@@ -91,29 +115,57 @@ pub async fn handle_upload_voice(
         AppError::BadRequest("Missing or empty reference audio file in multipart request".to_string())
     })?;
 
-    let resolved_voice_id = voice_id.unwrap_or_else(|| {
-        if let Some(fname) = fallback_filename {
-            let stem = StdPath::new(&fname)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .trim();
-            if !stem.is_empty() {
-                return stem.to_string();
-            }
+    let filename_stem = fallback_filename.as_deref().and_then(|fname| {
+        let stem = StdPath::new(fname)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .trim();
+        if stem.is_empty() {
+            None
+        } else {
+            Some(stem.to_string())
         }
+    });
+
+    // Prefer explicit voice_id, then SkyrimNet's `snv1-<sha256>` filename stem if present,
+    // then `title` (e.g. `voice:malebrute`), then any filename stem, then MD5 fallback.
+    let resolved_voice_id = if let Some(ref id) = explicit_voice_id {
+        id.clone()
+    } else if let Some(ref stem) = filename_stem {
+        if stem.starts_with("snv1-") {
+            stem.clone()
+        } else if let Some(ref t) = title_field {
+            t.clone()
+        } else {
+            stem.clone()
+        }
+    } else if let Some(ref t) = title_field {
+        t.clone()
+    } else {
         let hash = format!("{:x}", md5::compute(&bytes));
         format!("snv1-{hash}")
-    });
+    };
 
     info!(
         voice_id = %resolved_voice_id,
+        title = ?title_field,
         bytes_len = bytes.len(),
         "Enrolled zero-shot reference voice via POST /v1/audio/voices"
     );
 
     {
         let mut lock = state.enrolled_voices.lock().await;
+        if let Some(ref t) = title_field {
+            if t != &resolved_voice_id {
+                lock.insert(t.clone(), bytes.clone());
+            }
+        }
+        if let Some(ref stem) = filename_stem {
+            if stem != &resolved_voice_id {
+                lock.insert(stem.clone(), bytes.clone());
+            }
+        }
         lock.insert(resolved_voice_id.clone(), bytes);
     }
 
@@ -121,7 +173,7 @@ pub async fn handle_upload_voice(
         StatusCode::OK,
         Json(json!({
             "voice_id": resolved_voice_id,
-            "title": resolved_voice_id,
+            "title": title_field.unwrap_or_else(|| resolved_voice_id.clone()),
         })),
     ))
 }
@@ -153,8 +205,9 @@ pub async fn handle_speech(
                 let lock = state.enrolled_voices.lock().await;
                 if let Some(bytes) = lock.get(trimmed_v) {
                     custom_audio_bytes = Some(bytes.clone());
-                } else if trimmed_v.starts_with("snv1-") {
-                    // SkyrimNet enrolled voice ID not found in memory (e.g. after bridge restart).
+                } else if is_skyrimnet_voice_id(trimmed_v) {
+                    // SkyrimNet enrolled voice ID (e.g. `snv1-...` or `voice:malebrute`) not found
+                    // in memory (such as after a bridge restart).
                     // Return HTTP 404 with error.code = "voice_not_found" so SkyrimNet automatically
                     // re-uploads the reference WAV via POST /v1/audio/voices and retries synthesis.
                     return Err(AppError::VoiceNotFound(trimmed_v.to_string()));

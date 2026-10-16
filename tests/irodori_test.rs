@@ -360,7 +360,8 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
     let mock_server = MockServer::start().await;
     let dummy_wav = make_dummy_wav();
     let skyrim_voice_id = "snv1-a1b2c3d4e5f6";
-    let ref_wav_bytes = b"RIFF_skyrim_femaleeventoned_wav_bytes";
+    let skyrim_local_voice = "voice:malebrute";
+    let ref_wav_bytes = b"RIFF_skyrim_malebrute_wav_bytes";
     let expected_hash = format!("{:x}", md5::compute(ref_wav_bytes));
     let expected_irodori_voice_id = format!("custom_ref_{expected_hash}");
 
@@ -402,12 +403,12 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
     let state = Arc::new(AppState::with_engine(config, engine));
     let app = create_router(state);
 
-    // Step A: SkyrimNet calls POST /v1/audio/speech before enrolling (e.g. after server restart)
-    // Expect HTTP 404 with error.code == "voice_not_found"
-    let uncached_req = json!({
+    // Step A: SkyrimNet calls POST /v1/audio/speech with `voice:malebrute` (or `snv1-...`)
+    // after a bridge restart before re-enrolling -> Expect HTTP 404 with error.code == "voice_not_found"
+    let uncached_local_req = json!({
         "model": "irodori-tts",
         "input": "[conspiratorial] ドラゴンボーン、聞いて",
-        "voice": skyrim_voice_id,
+        "voice": skyrim_local_voice,
         "response_format": "wav",
         "speed": 1.0
     });
@@ -419,7 +420,7 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
                 .uri("/v1/audio/speech")
                 .method("POST")
                 .header("Content-Type", "application/json")
-                .body(Body::from(serde_json::to_vec(&uncached_req).unwrap()))
+                .body(Body::from(serde_json::to_vec(&uncached_local_req).unwrap()))
                 .unwrap(),
         )
         .await
@@ -431,9 +432,10 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
     assert_eq!(err_json["error"]["code"], "voice_not_found");
 
     // Step B: SkyrimNet uploads reference voice via POST /v1/audio/voices
+    // Exact format sent by SkyrimNet vbeta27: title = "voice:malebrute", ref_audio filename = "snv1-<sha256>.wav"
     let boundary = "------------------------skyrimnetboundary";
     let multipart_body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"ref_text\"\r\n\r\n\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n{skyrim_voice_id}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"ref_audio\"; filename=\"femaleeventoned.wav\"\r\nContent-Type: audio/wav\r\n\r\n{}\r\n--{boundary}--\r\n",
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"ref_text\"\r\n\r\n\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n{skyrim_local_voice}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"ref_audio\"; filename=\"{skyrim_voice_id}.wav\"\r\nContent-Type: audio/wav\r\n\r\n{}\r\n--{boundary}--\r\n",
         std::str::from_utf8(ref_wav_bytes).unwrap()
     );
 
@@ -459,13 +461,21 @@ async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
     assert_eq!(enroll_json["voice_id"], skyrim_voice_id);
 
     // Step C: SkyrimNet retries POST /v1/audio/speech with the enrolled voice_id
+    let retry_req = json!({
+        "model": "irodori-tts",
+        "input": "[conspiratorial] ドラゴンボーン、聞いて",
+        "voice": skyrim_voice_id,
+        "response_format": "wav",
+        "speed": 1.0
+    });
+
     let retry_resp = app
         .oneshot(
             Request::builder()
                 .uri("/v1/audio/speech")
                 .method("POST")
                 .header("Content-Type", "application/json")
-                .body(Body::from(serde_json::to_vec(&uncached_req).unwrap()))
+                .body(Body::from(serde_json::to_vec(&retry_req).unwrap()))
                 .unwrap(),
         )
         .await
