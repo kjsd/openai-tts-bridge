@@ -1,6 +1,12 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
+/// Regex matching `<SE>` and `</SE>` wrapper tags used by Higgs/OpenAI audio prompts
+static SE_WRAPPER_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)</?se>")
+        .expect("Failed to compile SE_WRAPPER_REGEX in irodori mapper")
+});
+
 /// Regex matching full bracketed or starred tags:
 /// [tag], 【tag】, (tag), （tag）, *tag*
 static FULL_TAG_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -43,110 +49,176 @@ pub struct IrodoriMapper;
 
 impl IrodoriMapper {
     /// Maps a raw tag string to an official Irodori-TTS emoji (all 36 official styles),
-    /// or None if the tag should be safely removed without vocalization.
+    /// covering all 138 SkyrimNet carry_tags_*.yaml tags, 0650_audio_tags.prompt tags,
+    /// and Higgs-style tags, or None if the tag should be safely removed without vocalization.
     pub fn tag_to_emoji(tag: &str) -> Option<&'static str> {
         let normalized = tag.trim().to_lowercase();
         match normalized.as_str() {
             // === 1. Whispering & Soft Ear-level Voice (👂) ===
-            "whisper" | "whispering" | "whispers" | "shush" | "shh" | "quiet"
+            "whisper" | "whispering" | "whispers" | "whispered" | "hushed" | "quiet"
+            | "quietly" | "shush" | "shh" | "murmurs" | "murmuring" | "mutters"
+            | "muttering" | "mumbles" | "mumbling" | "conspiratorial" | "style-whisper"
             | "ささやき" | "囁き" | "耳元" | "小声" | "静かに" => Some("👂"),
 
-            // === 2. Gentle & Tender (🫶) ===
-            "gentle" | "sweet" | "soft" | "softly" | "優しく" | "慈しむ" => Some("🫶"),
+            // === 2. Gentle & Tender & Warm & Seductive (🫶) ===
+            "gentle" | "gently" | "sweet" | "soft" | "softly" | "tender" | "tenderly"
+            | "warm" | "warmly" | "seductive" | "seductively" | "sultry"
+            | "flirtatious" | "flirtatiously" | "reverent"
+            | "優しく" | "慈しむ" => Some("🫶"),
 
-            // === 3. Sigh & Breathing & Sleep breath (😮‍💨) ===
-            "sigh" | "sighs" | "ため息" | "息" | "寝息" => Some("😮‍💨"),
+            // === 3. Sigh & Breathing & Tired & Resigned (😮‍💨) ===
+            "sigh" | "sighs" | "sighing" | "exhale" | "inhale"
+            | "tired" | "exhausted" | "weary" | "wearily" | "resigned" | "bored"
+            | "sfx-sigh" | "sfx-breath"
+            | "ため息" | "息" | "寝息" => Some("😮‍💨"),
 
             // === 4. Shortness of breath & Panting (🌬️) ===
-            "pant" | "pants" | "息切れ" | "激しい呼吸" => Some("🌬️"),
+            "pant" | "pants" | "panting" | "breathless" | "breathlessly" | "out of breath"
+            | "sfx-pant"
+            | "息切れ" | "激しい呼吸" => Some("🌬️"),
 
             // === 5. Chuckling & Suppressed Giggling (🤭) ===
-            "chuckle" | "chuckles" | "giggle" | "giggles" | "くすくす" | "忍び笑い" | "吹き出し" => Some("🤭"),
+            "chuckle" | "chuckles" | "chuckling" | "giggle" | "giggles" | "giggling"
+            | "snicker" | "snickers" | "sfx-chuckle" | "sfx-giggle" | "style-chuckle"
+            | "style-giggle"
+            | "くすくす" | "忍び笑い" | "吹き出し" => Some("🤭"),
 
-            // === 6. Happy & Joy & Bright Smile (😊) ===
-            "happy" | "joy" | "smile" | "喜" | "歓喜" | "明るく" | "嬉しそう" => Some("😊"),
+            // === 6. Happy & Joy & Bright Smile & Proud (😊) ===
+            "happy" | "happily" | "joy" | "joyful" | "joyfully" | "cheerful" | "cheerfully"
+            | "smile" | "hopeful" | "proud" | "proudly" | "confident" | "confidently"
+            | "emotion-happy" | "emotion-joy" | "emotion-cheerful" | "emotion-proud"
+            | "喜" | "歓喜" | "明るく" | "嬉しそう" => Some("😊"),
 
             // === 7. Excited & Exuberant Laughter (😆) ===
-            "laugh" | "laughs" | "laughter" | "笑い" | "大笑い" | "笑"
-            | "excited" | "わくわく" | "興奮" | "楽しそう" => Some("😆"),
+            "laugh" | "laughs" | "laughter" | "laughing" | "excited" | "excitedly"
+            | "sfx-laughter" | "sfx-laugh" | "emotion-excited"
+            | "笑い" | "大笑い" | "笑" | "わくわく" | "興奮" | "楽しそう" => Some("😆"),
 
-            // === 8. Angry & Screaming & Yelling (😡) ===
-            "angry" | "anger" | "mad" | "shout" | "shouts" | "yell" | "yells" | "screaming"
-            | "furious" | "irritated" | "怒り" | "怒" | "叫び" | "不満" | "拗ね" => Some("😡"),
+            // === 8. Angry & Screaming & Yelling & Stern (😡) ===
+            "angry" | "angrily" | "anger" | "mad" | "furious" | "furiously"
+            | "irritated" | "frustrated" | "impatient" | "impatiently"
+            | "bitter" | "bitterly" | "disgusted" | "disgust"
+            | "shout" | "shouts" | "shouting" | "yell" | "yells" | "yelling"
+            | "loudly" | "scream" | "screams" | "screaming"
+            | "menacing" | "menacingly" | "threatening" | "defiant" | "defiantly"
+            | "stern" | "sternly" | "commanding" | "authoritative" | "gruff" | "gruffly"
+            | "emotion-angry" | "emotion-furious" | "emotion-frustrated" | "emotion-disgust"
+            | "style-shout"
+            | "怒り" | "怒" | "叫び" | "不満" | "拗ね" => Some("😡"),
 
-            // === 9. Sad & Crying & Weeping (😭) ===
-            "sad" | "sorrow" | "grief" | "crying" | "cry" | "cries" | "weep" | "weeping"
+            // === 9. Sad & Crying & Weeping & Sorrow (😭) ===
+            "sad" | "sadly" | "sorrow" | "sorrowful" | "mournful" | "grief" | "grieving"
+            | "melancholy" | "wistful" | "tearful" | "tearfully" | "ashamed"
+            | "crying" | "cry" | "cries" | "weep" | "weeping" | "sob" | "sobs" | "sobbing"
+            | "emotion-sad" | "emotion-sorrow" | "emotion-melancholy" | "sfx-cry" | "sfx-sob"
             | "悲しい" | "哀" | "泣き" | "泣" | "すすり泣き" => Some("😭"),
 
-            // === 10. Trembling Voice & Timid (🥺) ===
-            "trembling" | "timid" | "おどおど" | "震え声" | "頼りない" => Some("🥺"),
+            // === 10. Trembling Voice & Timid & Hesitant (🥺) ===
+            "trembling" | "timid" | "timidly" | "shaky" | "shakily"
+            | "weak" | "weakly" | "hesitant" | "hesitantly"
+            | "おどおど" | "震え声" | "頼りない" => Some("🥺"),
 
-            // === 11. Fear & Panicked & Flustered (😰) ===
-            "fear" | "fearful" | "scared" | "terrified" | "frightened" | "panicked"
+            // === 11. Fear & Panicked & Urgent & Desperate (😰) ===
+            "fear" | "fearful" | "scared" | "terrified" | "frightened" | "afraid" | "panicked"
+            | "nervous" | "nervously" | "anxious" | "anxiously"
+            | "urgent" | "urgently" | "desperate" | "desperately"
+            | "emotion-fear" | "emotion-anxious" | "emotion-nervous" | "emotion-panicked"
             | "恐れ" | "怖" | "恐怖" | "慌て" | "焦り" | "取り乱す" => Some("😰"),
 
             // === 12. Surprise & Shock & Gasp (😲) ===
-            "surprise" | "surprised" | "shock" | "shocked" | "驚き" | "驚" | "gasp" | "gasps"
-            | "ハッ" | "息をのむ" | "感嘆" => Some("😲"),
+            "surprise" | "surprised" | "shock" | "shocked" | "startled" | "astonished"
+            | "gasp" | "gasps" | "gasping" | "emotion-surprise" | "emotion-surprised" | "sfx-gasp"
+            | "驚き" | "驚" | "ハッ" | "息をのむ" | "感嘆" => Some("😲"),
 
-            // === 13. Distressed & In Pain (😖) ===
-            "distress" | "pain" | "苦しい" | "苦しそう" => Some("😖"),
+            // === 13. Distressed & In Pain & Strained (😖) ===
+            "distress" | "pain" | "pained" | "strained" | "hoarse" | "hoarsely"
+            | "wince" | "winces" | "emotion-pain"
+            | "苦しい" | "苦しそう" => Some("😖"),
 
             // === 14. Worried & Uneasy (😟) ===
-            "worried" | "uneasy" | "心配" | "不安" => Some("😟"),
+            "worried" | "uneasy" | "concerned" | "emotion-worried"
+            | "心配" | "不安" => Some("😟"),
 
-            // === 15. Annoyed & Exasperated (🙄) ===
-            "annoyed" | "exasperated" | "呆れ" | "やれやれ" => Some("🙄"),
+            // === 15. Annoyed & Exasperated & Cold & Dismissive (🙄) ===
+            "annoyed" | "exasperated" | "dismissive" | "dismissively"
+            | "cold" | "coldly" | "grim" | "grimly" | "deadpan" | "monotone"
+            | "emotion-annoyed"
+            | "呆れ" | "やれやれ" => Some("🙄"),
 
             // === 16. Tongue Clicking (😒) ===
-            "click tongue" | "tongue click" | "舌打ち" => Some("😒"),
+            "click tongue" | "tongue click" | "tsk" | "tut" | "sfx-tsk"
+            | "舌打ち" => Some("😒"),
 
-            // === 17. Sarcastic & Teasing & Smirk (😏) ===
-            "sarcastic" | "sarcasm" | "ironic" | "皮肉" | "teasing" | "からかい" | "甘え" | "宥め" | "ニヤリ" => Some("😏"),
+            // === 17. Sarcastic & Teasing & Smirk & Playful (😏) ===
+            "sarcastic" | "sarcastically" | "sarcasm" | "ironic"
+            | "mocking" | "mockingly" | "smug" | "smugly" | "smirk" | "scoff" | "scoffs"
+            | "playful" | "playfully" | "teasing" | "teasingly"
+            | "style-sarcastic" | "style-teasing" | "style-playful" | "style-mocking"
+            | "皮肉" | "からかい" | "甘え" | "宥め" | "ニヤリ" => Some("😏"),
 
-            // === 18. Shy & Bashful (🫣) ===
-            "shy" | "bashful" | "恥ずかしい" | "照れ" => Some("🫣"),
+            // === 18. Shy & Bashful & Embarrassed (🫣) ===
+            "shy" | "shyly" | "bashful" | "embarrassed" | "flustered"
+            | "emotion-shy" | "emotion-embarrassed"
+            | "恥ずかしい" | "照れ" => Some("🫣"),
 
-            // === 19. Relieved & Satisfied (😌) ===
-            "relieved" | "satisfied" | "安堵" | "ほっとした" | "満足" => Some("😌"),
+            // === 19. Relieved & Satisfied & Calm & Solemn (😌) ===
+            "relieved" | "satisfied" | "calm" | "calmly" | "serious" | "seriously"
+            | "solemn" | "solemnly" | "determined" | "narration" | "narrator"
+            | "emotion-calm" | "emotion-relieved" | "emotion-serious" | "style-narration"
+            | "安堵" | "ほっとした" | "満足" => Some("😌"),
 
             // === 20. Sleepy & Sluggish (😴) ===
-            "sleepy" | "drowsy" | "眠い" | "気だるげ" => Some("😴"),
+            "sleepy" | "sleepily" | "drowsy"
+            | "眠い" | "気だるげ" => Some("😴"),
 
             // === 21. Yawn (🥱) ===
-            "yawn" | "yawns" | "あくび" => Some("🥱"),
+            "yawn" | "yawns" | "yawning" | "sfx-yawn"
+            | "あくび" => Some("🥱"),
 
             // === 22. Plead & Beg (🙏) ===
-            "plead" | "beg" | "お願い" | "頼み" => Some("🙏"),
+            "plead" | "pleading" | "beg" | "begging" | "imploring"
+            | "お願い" | "頼み" => Some("🙏"),
 
             // === 23. Drunk (🥴) ===
-            "drunk" | "酔っ払い" | "泥酔" => Some("🥴"),
+            "drunk" | "drunkenly" | "tipsy" | "slurred"
+            | "酔っ払い" | "泥酔" => Some("🥴"),
 
-            // === 24. Wondering & Questioning (🤔) ===
-            "wondering" | "questioning" | "疑問" | "思案" => Some("🤔"),
+            // === 24. Wondering & Questioning & Thoughtful & Curious (🤔) ===
+            "wondering" | "questioning" | "thoughtful" | "thoughtfully"
+            | "curious" | "curiously" | "confused" | "suspicious" | "suspiciously"
+            | "pondering" | "emotion-curious" | "emotion-confused"
+            | "疑問" | "思案" => Some("🤔"),
 
             // === 25. Agreeing / Backchanneling (👌) ===
             "agree" | "nod" | "相槌" | "肯定" => Some("👌"),
 
             // === 26. Groaning & Moaning & Heavy Breathing (🥵) ===
-            "groan" | "groans" | "moan" | "moans" | "うめき" | "呻き" | "喘ぎ" | "息遣い" => Some("🥵"),
+            "groan" | "groans" | "groaning" | "moan" | "moans" | "moaning"
+            | "grunt" | "grunts" | "sfx-groan" | "sfx-moan" | "sfx-grunt"
+            | "うめき" | "呻き" | "喘ぎ" | "息遣い" => Some("🥵"),
 
             // === 27. Coughing & Throat-clearing & Sneezing & Sniffling (🤧) ===
-            "clear throat" | "clears throat" | "cough" | "coughs" | "throat-clearing"
-            | "sniff" | "sniffs" | "sneeze" | "sneezes"
+            "clear throat" | "clears throat" | "clearing throat" | "throat-clearing"
+            | "cough" | "coughs" | "coughing"
+            | "sniff" | "sniffs" | "sniffling" | "sniffle" | "sniffles"
+            | "sneeze" | "sneezes" | "sneezing"
+            | "sfx-cough" | "sfx-clear-throat" | "sfx-sneeze" | "sfx-sniff"
             | "咳" | "咳払い" | "くしゃみ" | "鼻をすする" => Some("🤧"),
 
             // === 28. Wet sounds & Licking & Chewing (👅) ===
             "lick" | "licking" | "chew" | "wet sound" | "舌舐めずり" | "咀嚼音" | "水音" => Some("👅"),
 
-            // === 29. Lip smack & Lip noise (💋) ===
-            "lip smack" | "lip noise" | "リップノイズ" | "チュッ" => Some("💋"),
+            // === 29. Lip smack & Lip noise & Kiss (💋) ===
+            "lip smack" | "lip noise" | "kiss" | "smooch" | "sfx-kiss"
+            | "リップノイズ" | "チュッ" => Some("💋"),
 
             // === 30. Gulping & Swallowing (🥤) ===
-            "gulp" | "swallow" | "飲み込む" | "ゴクリ" => Some("🥤"),
+            "gulp" | "gulps" | "swallow" | "swallows" | "sfx-gulp" | "sfx-swallow"
+            | "飲み込む" | "ゴクリ" => Some("🥤"),
 
-            // === 31. Loudspeaker & Reverb / Echo (📢) ===
-            "dramatic" | "dramatic tone" | "loudspeaker" | "megaphone" | "echo" | "reverb"
+            // === 31. Loudspeaker & Reverb / Echo & Advertisement (📢) ===
+            "dramatic" | "dramatic tone" | "advertisement" | "commercial" | "announcer"
+            | "loudspeaker" | "megaphone" | "echo" | "reverb"
             | "拡声器" | "エコー" | "リバーブ" => Some("📢"),
 
             // === 32. Over Phone / Speaker (📞) ===
@@ -155,15 +227,21 @@ impl IrodoriMapper {
             // === 33. Muffled Voice (🤐) ===
             "muffled" | "こもった声" => Some("🤐"),
 
-            // === 34. Humming (🎵) ===
-            "humming" | "hum" | "鼻歌" => Some("🎵"),
+            // === 34. Humming & Singing (🎵) ===
+            "humming" | "hum" | "sings" | "singing" | "sing" | "song"
+            | "style-singing" | "style-hum"
+            | "鼻歌" => Some("🎵"),
 
             // === 35. Pause & Silence (⏸️) ===
-            "pause" | "間" | "沈黙" => Some("⏸️"),
+            "pause" | "silence" | "beat" | "hesitation"
+            | "間" | "沈黙" => Some("⏸️"),
 
             // === 36. Speed: Slowly (🐢) & Fast (⏩) ===
-            "slowly" | "ゆっくり" => Some("🐢"),
-            "fast" | "早口" | "急ぎ" => Some("⏩"),
+            "slowly" | "slow" | "deliberate" | "deliberately" | "prosody-slow"
+            | "ゆっくり" => Some("🐢"),
+            "fast" | "quickly" | "quick" | "rushed" | "hurried" | "hurriedly"
+            | "rapidly" | "prosody-fast"
+            | "早口" | "急ぎ" => Some("⏩"),
 
             // Unknown tags: safely remove so they are never spoken aloud
             _ => None,
@@ -174,8 +252,11 @@ impl IrodoriMapper {
     pub fn convert(input: &str) -> IrodoriMappedText {
         let mut detected_tags = Vec::new();
 
+        // 0. Strip <SE> / </SE> wrapper tags if present
+        let input_no_se = SE_WRAPPER_REGEX.replace_all(input, " ");
+
         // 1. Full enclosed tags: [tag], (tag), *tag*, etc.
-        let text_after_full = FULL_TAG_REGEX.replace_all(input, |caps: &regex::Captures| {
+        let text_after_full = FULL_TAG_REGEX.replace_all(&input_no_se, |caps: &regex::Captures| {
             let raw_tag = caps
                 .name("tag")
                 .or_else(|| caps.name("ztag"))
@@ -300,5 +381,22 @@ mod tests {
         assert_eq!(IrodoriMapper::tag_to_emoji("fear"), Some("😰"));
         assert_eq!(IrodoriMapper::tag_to_emoji("clear throat"), Some("🤧"));
         assert_eq!(IrodoriMapper::tag_to_emoji("dramatic"), Some("📢"));
+    }
+
+    #[test]
+    fn test_irodori_skyrimnet_vbeta27_carry_tags_and_se_wrappers() {
+        // Verify carry_tags_*.yaml tags and <SE>[tag]</SE> wrapper stripping
+        let input = "[conspiratorial] <SE>[Laughter]</SE> [hurriedly] こっちよ、急いで！ [resigned]";
+        let mapped = IrodoriMapper::convert(input);
+        assert_eq!(
+            mapped.detected_tags,
+            vec!["conspiratorial", "laughter", "hurriedly", "resigned"]
+        );
+        assert!(mapped.prompt_text.contains("👂"));
+        assert!(mapped.prompt_text.contains("😆"));
+        assert!(mapped.prompt_text.contains("⏩"));
+        assert!(mapped.prompt_text.contains("😮‍💨"));
+        assert!(!mapped.prompt_text.contains("<SE>"));
+        assert!(!mapped.prompt_text.contains("</SE>"));
     }
 }

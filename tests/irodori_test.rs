@@ -456,3 +456,127 @@ async fn test_irodori_gradio_generate_with_reference_voice_flow() {
     let _ = tokio::fs::remove_file(temp_voice_path).await;
     let _ = tokio::fs::remove_file(out_file_path).await;
 }
+
+#[tokio::test]
+async fn test_irodori_skyrimnet_openai_voice_enrollment_and_synthesis() {
+    let mock_server = MockServer::start().await;
+    let dummy_wav = make_dummy_wav();
+    let skyrim_voice_id = "snv1-a1b2c3d4e5f6";
+    let ref_wav_bytes = b"RIFF_skyrim_femaleeventoned_wav_bytes";
+    let expected_hash = format!("{:x}", md5::compute(ref_wav_bytes));
+    let expected_irodori_voice_id = format!("gradio_ref_{expected_hash}");
+
+    // 1. Mock Irodori backend voice upload
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/voices"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "voice_id": expected_irodori_voice_id,
+            "path": format!("/voices/{expected_irodori_voice_id}.wav")
+        })))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    // 2. Mock Irodori backend speech synthesis
+    let expected_irodori_voice_clone = expected_irodori_voice_id.clone();
+    Mock::given(method("POST"))
+        .and(path("/v1/audio/speech"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body_json: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(
+                body_json["voice"].as_str().unwrap(),
+                expected_irodori_voice_clone
+            );
+            let input_text = body_json["input"].as_str().unwrap();
+            assert!(input_text.contains('👂')); // [conspiratorial] -> 👂
+            assert!(input_text.contains("ドラゴンボーン、聞いて"));
+
+            ResponseTemplate::new(200)
+                .set_body_bytes(dummy_wav.clone())
+                .insert_header("content-type", "audio/wav")
+        })
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = create_irodori_test_config(mock_server.uri());
+    let engine = create_engine(&config).unwrap();
+    let state = Arc::new(AppState::with_engine(config, engine));
+    let app = create_router(state);
+
+    // Step A: SkyrimNet calls POST /v1/audio/speech before enrolling (e.g. after server restart)
+    // Expect HTTP 404 with error.code == "voice_not_found"
+    let uncached_req = json!({
+        "model": "irodori-tts",
+        "input": "[conspiratorial] ドラゴンボーン、聞いて",
+        "voice": skyrim_voice_id,
+        "response_format": "wav",
+        "speed": 1.0
+    });
+
+    let uncached_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/speech")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&uncached_req).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(uncached_resp.status(), StatusCode::NOT_FOUND);
+    let err_body = uncached_resp.into_body().collect().await.unwrap().to_bytes();
+    let err_json: Value = serde_json::from_slice(&err_body).unwrap();
+    assert_eq!(err_json["error"]["code"], "voice_not_found");
+
+    // Step B: SkyrimNet uploads reference voice via POST /v1/audio/voices
+    let boundary = "------------------------skyrimnetboundary";
+    let multipart_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"ref_text\"\r\n\r\n\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n{skyrim_voice_id}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"ref_audio\"; filename=\"femaleeventoned.wav\"\r\nContent-Type: audio/wav\r\n\r\n{}\r\n--{boundary}--\r\n",
+        std::str::from_utf8(ref_wav_bytes).unwrap()
+    );
+
+    let enroll_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/voices")
+                .method("POST")
+                .header(
+                    "Content-Type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(multipart_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(enroll_resp.status(), StatusCode::OK);
+    let enroll_body = enroll_resp.into_body().collect().await.unwrap().to_bytes();
+    let enroll_json: Value = serde_json::from_slice(&enroll_body).unwrap();
+    assert_eq!(enroll_json["voice_id"], skyrim_voice_id);
+
+    // Step C: SkyrimNet retries POST /v1/audio/speech with the enrolled voice_id
+    let retry_resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/speech")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&uncached_req).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(retry_resp.status(), StatusCode::OK);
+    assert_eq!(
+        retry_resp.headers().get("x-emotion-tags").unwrap(),
+        "conspiratorial"
+    );
+}
+

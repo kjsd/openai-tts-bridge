@@ -10,5 +10,5 @@ pub use gradio::{
 };
 pub use health::handle_health;
 pub use models::handle_models;
-pub use speech::handle_speech;
+pub use speech::{handle_speech, handle_upload_voice};
 pub use state::{AppState, GradioEventStatus};

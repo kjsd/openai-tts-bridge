@@ -422,4 +422,85 @@ async fn test_gradio_generate_and_file_flow() {
     );
 }
 
+#[tokio::test]
+async fn test_zonos2_skyrimnet_voice_enrollment_flow() {
+    let mock_server = MockServer::start().await;
+    let mut fake_pcm = Vec::new();
+    fake_pcm.write_f32::<LittleEndian>(0.25).unwrap();
+
+    let ref_wav_bytes = b"RIFF_zonos2_enrolled_voice";
+    let expected_b64 = base64::Engine::encode(
+        &base64::engine::general_purpose::STANDARD,
+        ref_wav_bytes,
+    );
+
+    Mock::given(method("POST"))
+        .and(path("/tts/generate"))
+        .and(wiremock::matchers::body_partial_json(serde_json::json!({
+            "speaker_audio_base64": expected_b64
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(fake_pcm))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let config = create_test_config(mock_server.uri());
+    let zonos = ZonosClient::new(config.zonos_url.clone());
+    let state = Arc::new(AppState::new(config, zonos));
+    let app = create_router(state);
+
+    // 1. Enroll voice via POST /v1/audio/voices
+    let boundary = "------------------------zonosboundary";
+    let voice_id = "snv1-zonos2voice123";
+    let multipart_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n{voice_id}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"ref_audio\"; filename=\"nina.wav\"\r\nContent-Type: audio/wav\r\n\r\n{}\r\n--{boundary}--\r\n",
+        std::str::from_utf8(ref_wav_bytes).unwrap()
+    );
+
+    let enroll_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/voices")
+                .method("POST")
+                .header(
+                    "Content-Type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(multipart_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(enroll_resp.status(), StatusCode::OK);
+
+    // 2. Synthesize using the enrolled voice ID
+    let speech_req = json!({
+        "model": "zonos2",
+        "input": "[playfully] 賢嗣、聞こえる？",
+        "voice": voice_id,
+        "response_format": "wav"
+    });
+
+    let speech_resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/speech")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&speech_req).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(speech_resp.status(), StatusCode::OK);
+    assert_eq!(
+        speech_resp.headers().get("x-emotion-tags").unwrap(),
+        "playfully"
+    );
+}
+
+
 

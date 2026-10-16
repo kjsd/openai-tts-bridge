@@ -18,6 +18,7 @@ pub struct AppState {
     pub engine: Arc<dyn TtsEngine>,
     pub zonos: ZonosClient,
     pub gradio_events: Mutex<HashMap<String, GradioEventStatus>>,
+    pub enrolled_voices: Mutex<HashMap<String, Vec<u8>>>,
 }
 
 impl AppState {
@@ -30,6 +31,7 @@ impl AppState {
             engine,
             zonos,
             gradio_events: Mutex::new(HashMap::new()),
+            enrolled_voices: Mutex::new(HashMap::new()),
         }
     }
 
@@ -40,6 +42,7 @@ impl AppState {
             engine,
             zonos,
             gradio_events: Mutex::new(HashMap::new()),
+            enrolled_voices: Mutex::new(HashMap::new()),
         }
     }
 }

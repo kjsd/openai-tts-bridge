@@ -3,7 +3,7 @@ use crate::engine::create_engine;
 use crate::handlers::{
     handle_fallback, handle_gradio_call_generate_audio, handle_gradio_file, handle_gradio_sse,
     handle_gradio_upload, handle_health, handle_languages, handle_models, handle_speakers,
-    handle_speech, AppState,
+    handle_speech, handle_upload_voice, AppState,
 };
 use axum::{
     routing::{get, post},
@@ -26,6 +26,7 @@ pub fn create_router(state: Arc<AppState>) -> Router {
     Router::new()
         // Standard OpenAI endpoints
         .route("/v1/audio/speech", post(handle_speech))
+        .route("/v1/audio/voices", post(handle_upload_voice))
         .route("/v1/models", get(handle_models))
         .route("/health", get(handle_health))
         // Gradio API endpoints (SkyrimNet / Chatterbox compatible)
