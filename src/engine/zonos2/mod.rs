@@ -96,6 +96,8 @@ impl TtsEngine for ZonosEngine {
             voice = %voice,
             has_custom_audio = speaker_audio_base64.is_some(),
             tags = ?parsed.detected_tags,
+            emotion_enabled = %parsed.emotion_enabled,
+            emotion_sliders = ?parsed.emotion_sliders,
             final_speed = %final_speed,
             "Zonos2: processing TTS request"
         );
@@ -106,11 +108,14 @@ impl TtsEngine for ZonosEngine {
             speaker_embedding_name,
             speaker_audio_base64,
             language: "ja".to_string(),
+            emotion_enabled: parsed.emotion_enabled,
             emotion_sliders: parsed.emotion_sliders,
+            emotion_valence: parsed.emotion_valence,
+            emotion_arousal: parsed.emotion_arousal,
             emotion_cfg_scale: parsed.emotion_cfg_scale,
             speed: final_speed,
             speaking_rate_enabled: true,
-            accurate_mode: true,
+            accurate_mode: parsed.accurate_mode,
             stream: false,
         };
 
