@@ -8,19 +8,28 @@ A high-performance, modular **OpenAI-compatible TTS proxy bridge** written in Ru
 It seamlessly bridges **OpenAI TTS clients** (**SkyrimNet `vbeta27+`**, `nina_agent`, `kitt_agent`, Open WebUI, AnythingLLM, etc.) with state-of-the-art local TTS engines using a plugin-based multi-engine architecture.
 
 Supported engines:
-- **Aratako Irodori-TTS** (`model: "irodori-tts"` or `"irodori"`): Expressive Japanese TTS controlled via all **39 official inline Unicode style emojis** (`👂`, `😮‍💨`, `🤭`, `😊`, `😠`, `😭`, `😱`, `🫶`, `😏`, `🥺`, etc.).
-- **Zyphra Zonos 2** (`model: "zonos2"` or `"zonos"`): High-dimensional emotion vectors, speaking-rate conditioning, and ultra-fast 32-bit float to 16-bit PCM WAV conversion.
+- **Aratako Irodori-TTS** (`model: "irodori-tts"` or `"irodori"`): Expressive Japanese TTS controlled via all **39 official inline Unicode style emojis** (`👂`, `😮‍💨`, `🤭`, `😊`, `😠`, `😭`, `😱`, `🫶`, `😏`, `🥺`, etc.). Preserves native Japanese prosody (`〜`, `…`) while applying user pronunciation dictionary entries.
+- **Zyphra Zonos 2** (`model: "zonos2"` or `"zonos-2"`): High-dimensional emotion vectors, speaking-rate conditioning, Zonos-tuned text normalization (`〜` $\rightarrow$ `ー` / `から`, unit readings, ellipsis cleanup), and ultra-fast 32-bit float to 16-bit PCM WAV conversion.
+- **Zyphra Zonos v0.1 Gradio** (`model: "zonos"` or `"zonos-v0.1"`): Full Gradio 5 two-step SSE client (`/gradio_api/upload` MD5 speaker cache + 29-arg `/gradio_api/call/generate_audio`), sentence chunking for `espeak-ng` stability, 8D emotion mapping, and seamless PCM16 WAV chunk concatenation with configurable silence.
 
 ---
 
 ## ⚡ Features
 
-- **Dynamic Per-Request Engine Routing (No Restart Required)**:
-  - Both `IrodoriEngine` and `ZonosEngine` are active simultaneously in memory.
+- **Embedded Management Web UI & Single-File TOML Persistence (Zero DB / Zero JS Bloat)**:
+  - Open `http://<server-ip>:8080/` (or `/admin`) in any browser to configure the default engine, backend URLs, per-engine text normalization toggles, and the **User Pronunciation Dictionary (`[[dictionary]]`)**, plus preview text normalization (`POST /api/preview`) and audition audio live!
+  - Settings are persisted atomically (`tmp` $\rightarrow$ `fsync` $\rightarrow$ `rename`) to a single human-readable `config.toml` file and hot-reloaded in memory via `RwLock<Arc<CompiledSettings>>` with zero downtime.
+- **Per-Engine Japanese Text Normalization**:
+  - Reusable normalization primitives (`UserDictionary`, `fix_wave_dash`, `convert_units`, `normalize_zonos_punctuation`, `strip_markdown`) configured independently per engine:
+    - **Irodori-TTS**: Defaults to **dictionary-only** (`fix_wave_dash = false`, `normalize_punctuation = false`, `convert_units = false`), keeping native `〜` / `…` prosody intact.
+    - **Zonos 2 & Zonos v0.1**: Defaults to full normalization so `の〜んびり` becomes `のーんびり` (never misread as `から`), `10cm` becomes `10センチ`, and sentence-ending ellipses don't cause phonemizer hallucinations.
+- **Dynamic Per-Request Engine Routing & Global GPU Mutex**:
+  - All three engines (`IrodoriEngine`, `ZonosEngine`, `ZonosV1Engine`) are active simultaneously in memory and share a unified GPU concurrency lock to prevent VRAM contention.
   - Dynamically select or switch engines per request via the OpenAI `model` parameter in `POST /v1/audio/speech`:
-    - `"irodori-tts"` / `"irodori"` $\rightarrow$ **Irodori-TTS**
-    - `"zonos2"` / `"zonos"` $\rightarrow$ **Zonos 2**
-    - `"tts-1"` / `"tts-1-hd"` / `"default"` / omitted $\rightarrow$ **Default Engine** configured via `TTS_ENGINE` (`irodori` or `zonos2`).
+    - `"irodori-tts"` / `"irodori"` $\rightarrow$ **Irodori-TTS** (`:8088`)
+    - `"zonos2"` / `"zonos-2"` $\rightarrow$ **Zonos 2** (`:1919`)
+    - `"zonos"` / `"zonos-v0.1"` $\rightarrow$ **Zonos v0.1 Gradio** (`:7860`)
+    - `"tts-1"` / `"tts-1-hd"` / `"default"` / omitted $\rightarrow$ **Default Engine** configured in Web UI / `config.toml` (`general.default_engine`).
 - **OpenAI Speech & Shared Zero-Shot Voice Enrollment API**:
   - **Speech Synthesis (`POST /v1/audio/speech`)**: Standard OpenAI TTS JSON payload (`model`, `input`, `voice`, `speed`, `response_format`) plus optional `speaker_audio_base64`.
   - **Shared Zero-Shot Voice Enrollment (`POST /v1/audio/voices`)**: Supports SkyrimNet `OpenAICompatibleTTSInterface` automatic multipart voice uploading (`ref_audio`, `title` / `voice_id`, `ref_text`) and automatic re-enrollment recovery (`HTTP 404` with `error.code = "voice_not_found"`). Enrolled reference `.wav` voices are stored in a shared in-memory store and can be used across **both Irodori-TTS and Zonos 2** without re-uploading when switching models.
@@ -125,15 +134,18 @@ All options can be configured via CLI arguments or environment variables (or a `
 
 | CLI Flag | Env Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `--tts-engine` | `TTS_ENGINE` | `zonos2` | Default backend engine when `model` is omitted or generic (`tts-1`): `zonos2` or `irodori` |
+| `--tts-engine` | `TTS_ENGINE` | `zonos2` | Initial default backend engine (`zonos`, `zonos2`, or `irodori`) |
 | `--host` | `HOST` | `0.0.0.0` | Bind address |
-| `--port` | `PORT` | `8000` | Listen port |
+| `--port` | `PORT` | `8080` | Listen port (serves both OpenAI API and Management Web UI) |
+| `--zonos-v1-url` | `ZONOS_V1_URL` | `http://127.0.0.1:7860` | Zonos v0.1 Gradio server base URL |
 | `--zonos-url` | `ZONOS_URL` | `http://127.0.0.1:1919` | Zonos 2 FastAPI server base URL |
 | `--irodori-url` | `IRODORI_URL` | `http://127.0.0.1:8088` | Irodori-TTS-Server base URL |
 | `--irodori-model` | `IRODORI_MODEL` | `irodori-tts` | Model identifier sent to Irodori-TTS |
 | `--default-voice` | `DEFAULT_VOICE` | `default` | Fallback speaker/voice ID when none is provided |
-| `--default-model` | `DEFAULT_MODEL` | `zonos2` | Default model name for Zonos 2 |
+| `--default-language` | `DEFAULT_LANGUAGE` | `ja` | Default language code (`ja`, `en-us`, etc.) |
+| `--default-model` | `DEFAULT_MODEL` | `zonos2` | Default model name alias |
 | `--default-speed` | `DEFAULT_SPEED` | `1.15` | Base speech speed multiplier (used by Zonos 2) |
+| `--config-file` | `CONFIG_FILE` | `config.toml` | Persistent TOML settings & dictionary file path |
 | `--max-body-size-mb` | `MAX_BODY_SIZE_MB` | `100` | Max HTTP request payload size in MB |
 | `--log-level` | `LOG_LEVEL` | `info` | Log level (`error`, `warn`, `info`, `debug`, `trace`) |
 

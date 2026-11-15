@@ -1,9 +1,9 @@
 [package]
 name = "openai-tts-bridge"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 authors = ["Kenji Minoura <minoru@kandj.org>", "Nina <nina@kandj.org>"]
-description = "High-performance Rust bridge providing an OpenAI-compatible TTS API for multiple engines (Zonos 2, Irodori-TTS)"
+description = "High-performance Rust bridge providing an OpenAI-compatible TTS API and Web UI for multiple engines (Zonos v0.1, Zonos 2, Irodori-TTS)"
 license = "MIT"
 
 [dependencies]
@@ -13,6 +13,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 bytes = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 clap = { version = "4.5", features = ["derive", "env"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

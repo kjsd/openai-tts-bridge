@@ -4,11 +4,13 @@ use axum::{
 };
 use tracing::warn;
 
+pub mod admin;
 pub mod health;
 pub mod models;
 pub mod speech;
 pub mod state;
 
+pub use admin::{handle_admin_ui, handle_get_settings, handle_preview, handle_put_settings};
 pub use health::handle_health;
 pub use models::handle_models;
 pub use speech::{handle_speech, handle_upload_voice};

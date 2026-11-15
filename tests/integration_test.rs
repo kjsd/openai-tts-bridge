@@ -24,6 +24,7 @@ fn create_test_config(zonos_url: String) -> Config {
         log_level: "error".to_string(),
         max_body_size_mb: 100,
         default_speed: 1.15,
+        ..Config::default()
     }
 }
 
@@ -422,6 +423,7 @@ async fn test_dynamic_model_switching_between_irodori_and_zonos2() {
         log_level: "error".to_string(),
         max_body_size_mb: 100,
         default_speed: 1.0,
+        ..Config::default()
     };
 
     let state = Arc::new(AppState::new(config));

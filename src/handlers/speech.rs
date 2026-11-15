@@ -21,6 +21,7 @@ pub struct SpeechRequest {
     pub voice: Option<String>,
     pub response_format: Option<String>,
     pub speed: Option<f32>,
+    pub language: Option<String>,
     pub speaker_audio_base64: Option<String>,
     pub speaker_wav_base64: Option<String>,
     pub temperature: Option<f32>,
@@ -225,6 +226,7 @@ pub async fn handle_speech(
         custom_speaker_audio_base64: custom_b64,
         speed: payload.speed,
         response_format: payload.response_format,
+        language: payload.language,
     };
 
     let result = engine.synthesize(req).await?;

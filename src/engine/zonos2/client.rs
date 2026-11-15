@@ -11,12 +11,16 @@ use tracing::{debug, info};
 pub struct ZonosClient {
     client: Client,
     base_url: String,
-    // Concurrency guard to serialize GPU TTS execution
+    // Shared concurrency guard to serialize GPU TTS execution across engines
     lock: Arc<Mutex<()>>,
 }
 
 impl ZonosClient {
     pub fn new(base_url: String) -> Self {
+        Self::with_lock(base_url, Arc::new(Mutex::new(())))
+    }
+
+    pub fn with_lock(base_url: String, lock: Arc<Mutex<()>>) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(5))
@@ -26,16 +30,26 @@ impl ZonosClient {
         Self {
             client,
             base_url: base_url.trim_end_matches('/').to_string(),
-            lock: Arc::new(Mutex::new(())),
+            lock,
         }
     }
 
-    /// Calls Zonos 2 /tts/generate and returns raw float32 PCM bytes.
+    /// Calls Zonos 2 /tts/generate using the configured default base URL.
     pub async fn generate_pcm(&self, req: &ZonosGenerateRequest) -> Result<Bytes, AppError> {
-        // Acquire lock to ensure only one TTS request runs on GPU at a time
+        self.generate_pcm_at(&self.base_url, req).await
+    }
+
+    /// Calls Zonos 2 /tts/generate at `base_url` and returns raw float32 PCM bytes.
+    pub async fn generate_pcm_at(
+        &self,
+        base_url: &str,
+        req: &ZonosGenerateRequest,
+    ) -> Result<Bytes, AppError> {
+        // Acquire shared GPU lock to ensure only one TTS request runs on GPU at a time
         let _guard = self.lock.lock().await;
 
-        let url = format!("{}/tts/generate", self.base_url);
+        let base = base_url.trim_end_matches('/');
+        let url = format!("{base}/tts/generate");
         debug!(
             url = %url,
             text = %req.text,
@@ -77,13 +91,19 @@ impl ZonosClient {
         Ok(bytes)
     }
 
-    /// Health check for Zonos 2 backend
+    /// Health check for Zonos 2 backend using default base URL
     pub async fn health_check(&self) -> bool {
-        let url = format!("{}/tts/capabilities", self.base_url);
+        self.health_check_at(&self.base_url).await
+    }
+
+    /// Health check for Zonos 2 backend at `base_url`
+    pub async fn health_check_at(&self, base_url: &str) -> bool {
+        let base = base_url.trim_end_matches('/');
+        let url = format!("{base}/tts/capabilities");
         match self.client.get(&url).send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => {
-                let root_url = format!("{}/", self.base_url);
+                let root_url = format!("{base}/");
                 match self.client.get(&root_url).send().await {
                     Ok(resp) => resp.status().is_success(),
                     Err(_) => false,

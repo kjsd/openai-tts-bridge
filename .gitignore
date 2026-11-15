@@ -26,3 +26,5 @@ target
 /target
 
 *.wav
+/config.toml
+*.toml.tmp*

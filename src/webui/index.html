@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>openai-tts-bridge Admin</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #171f28;
+      --panel-alt: #1e2936;
+      --border: #2c3a4b;
+      --text: #e6edf3;
+      --muted: #8b9bb0;
+      --accent: #3fb950;
+      --accent-blue: #58a6ff;
+      --danger: #f85149;
+      --warn: #d29922;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .brand code {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--panel-alt);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent-blue);
+    }
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-family: var(--mono);
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .dot.up { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .dot.down { background: var(--danger); }
+    main {
+      max-width: 1180px;
+      margin: 18px auto 48px;
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 18px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    h3 {
+      margin: 0 0 10px;
+      font-size: 13px;
+      color: var(--accent-blue);
+      font-family: var(--mono);
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px 14px;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .field-inline {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    input[type="text"],
+    input[type="number"],
+    select,
+    textarea {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    input.mono, textarea.mono { font-family: var(--mono); }
+    textarea { width: 100%; min-height: 68px; resize: vertical; }
+    .checks {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border);
+    }
+    .checks label {
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      cursor: pointer;
+    }
+    button {
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 6px 13px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover { border-color: var(--accent-blue); }
+    button.primary {
+      background: #238636;
+      border-color: #2ea043;
+      color: #fff;
+    }
+    button.primary:hover { background: #2ea043; }
+    button.blue {
+      background: #1f6feb;
+      border-color: #388bfd;
+      color: #fff;
+    }
+    button.danger {
+      color: var(--danger);
+      padding: 3px 8px;
+      font-size: 12px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .toast {
+      font-size: 12px;
+      font-family: var(--mono);
+      color: var(--accent);
+    }
+    .toast.err { color: var(--danger); }
+    pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 10px;
+      margin: 10px 0 0;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th { color: var(--muted); font-size: 12px; font-weight: 600; }
+    td input[type="text"] { width: 100%; }
+    audio { height: 34px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span>openai-tts-bridge</span>
+      <code>v0.3 Unified</code>
+    </div>
+    <div class="status-row">
+      <span class="badge"><span id="dot-zonos" class="dot"></span>zonos (:7860)</span>
+      <span class="badge"><span id="dot-zonos2" class="dot"></span>zonos2 (:1919)</span>
+      <span class="badge"><span id="dot-irodori" class="dot"></span>irodori (:8088)</span>
+      <button type="button" onclick="refreshHealth()">Health Check</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 1. Test & Preview Playground -->
+    <section>
+      <h2>
+        <span>Test Synthesis &amp; Normalization Preview</span>
+        <span id="play-status" class="toast"></span>
+      </h2>
+      <div class="field-inline">
+        <div class="field">
+          <label for="test-model">Target Model</label>
+          <select id="test-model">
+            <option value="default">default (Follow Default Engine)</option>
+            <option value="zonos">zonos (Zonos v0.1 Gradio)</option>
+            <option value="zonos2">zonos2 (Zonos 2 FastAPI)</option>
+            <option value="irodori-tts">irodori-tts (Irodori-TTS)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="test-voice">Voice</label>
+          <input id="test-voice" type="text" class="mono" placeholder="(default)" style="width:130px" />
+        </div>
+        <div class="field">
+          <label for="test-lang">Language</label>
+          <select id="test-lang">
+            <option value="">(default)</option>
+            <option value="ja">ja</option>
+            <option value="en-us">en-us</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="test-speed">Speed</label>
+          <input id="test-speed" type="number" step="0.05" min="0.25" max="4.0" value="1.0" style="width:85px" />
+        </div>
+      </div>
+      <div class="field">
+        <label for="test-input">Sample Input Text (supports [tags], *tags*, units, dictionary terms)</label>
+        <textarea id="test-input">[playfully] 東白川村での〜んびりmBot2を10cm動かそう…！</textarea>
+      </div>
+      <div class="actions">
+        <button type="button" onclick="runPreview()">Preview Normalization (No GPU)</button>
+        <button type="button" class="blue" onclick="runSynthesize()">Synthesize &amp; Play</button>
+        <audio id="audio-player" controls style="display:none"></audio>
+      </div>
+      <pre id="preview-output" style="display:none"></pre>
+    </section>
+
+    <!-- 2. General & Per-Engine Settings -->
+    <section>
+      <h2>
+        <span>Engine Routing &amp; Normalization Settings</span>
+        <span id="save-status" class="toast"></span>
+      </h2>
+
+      <div class="field-inline" style="margin-bottom:12px">
+        <div class="field">
+          <label for="gen-default-engine">Default Engine (when model="tts-1" / omitted)</label>
+          <select id="gen-default-engine">
+            <option value="zonos">zonos (Zonos v0.1 Gradio)</option>
+            <option value="zonos2">zonos2 (Zonos 2 FastAPI)</option>
+            <option value="irodori">irodori (Irodori-TTS)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="gen-default-voice">Default Voice</label>
+          <input id="gen-default-voice" type="text" class="mono" style="width:150px" />
+        </div>
+        <div class="field">
+          <label for="gen-default-lang">Default Language</label>
+          <input id="gen-default-lang" type="text" class="mono" style="width:90px" />
+        </div>
+      </div>
+
+      <div class="grid-3">
+        <!-- Zonos v0.1 -->
+        <div class="card">
+          <h3>[engines.zonos] (Zonos v0.1 Gradio)</h3>
+          <div class="field">
+            <label>Gradio URL</label>
+            <input id="z1-url" type="text" class="mono" />
+          </div>
+          <div class="field-inline">
+            <div class="field">
+              <label>Speaking Rate</label>
+              <input id="z1-rate" type="number" step="0.5" min="5" max="30" style="width:82px" />
+            </div>
+            <div class="field">
+              <label>Pitch Std</label>
+              <input id="z1-pitch" type="number" step="1" min="5" max="200" style="width:82px" />
+            </div>
+            <div class="field">
+              <label>Silence (ms)</label>
+              <input id="z1-silence" type="number" step="10" min="0" max="2000" style="width:82px" />
+            </div>
+          </div>
+          <div class="checks">
+            <label><input id="z1-dict" type="checkbox" /> ユーザー辞書を適用 (use_dictionary)</label>
+            <label><input id="z1-wave" type="checkbox" /> 波ダッシュ補正 〜→ー/から (fix_wave_dash)</label>
+            <label><input id="z1-punct" type="checkbox" /> 句読点整形・文分割 (normalize_punctuation)</label>
+            <label><input id="z1-units" type="checkbox" /> 単位の読み変換 10cm→10センチ (convert_units)</label>
+          </div>
+        </div>
+
+        <!-- Zonos 2 -->
+        <div class="card">
+          <h3>[engines.zonos2] (Zonos 2 FastAPI)</h3>
+          <div class="field">
+            <label>FastAPI URL</label>
+            <input id="z2-url" type="text" class="mono" />
+          </div>
+          <div class="field">
+            <label>Default Speed Multiplier</label>
+            <input id="z2-speed" type="number" step="0.05" min="0.25" max="4.0" style="width:110px" />
+          </div>
+          <div class="checks">
+            <label><input id="z2-dict" type="checkbox" /> ユーザー辞書を適用 (use_dictionary)</label>
+            <label><input id="z2-wave" type="checkbox" /> 波ダッシュ補正 〜→ー/から (fix_wave_dash)</label>
+            <label><input id="z2-punct" type="checkbox" /> 三点リーダー・末尾記号整理 (normalize_punctuation)</label>
+            <label><input id="z2-units" type="checkbox" /> 単位の読み変換 10cm→10センチ (convert_units)</label>
+          </div>
+        </div>
+
+        <!-- Irodori-TTS -->
+        <div class="card">
+          <h3>[engines.irodori] (Irodori-TTS)</h3>
+          <div class="field">
+            <label>Irodori Server URL</label>
+            <input id="iro-url" type="text" class="mono" />
+          </div>
+          <div class="field-inline">
+            <div class="field">
+              <label>Model ID</label>
+              <input id="iro-model" type="text" class="mono" style="width:130px" />
+            </div>
+            <div class="field">
+              <label>Default Speed</label>
+              <input id="iro-speed" type="number" step="0.05" min="0.25" max="4.0" style="width:90px" />
+            </div>
+          </div>
+          <div class="checks">
+            <label><input id="iro-dict" type="checkbox" /> ユーザー辞書を適用 (use_dictionary)</label>
+            <label><input id="iro-wave" type="checkbox" /> 波ダッシュ補正 〜→ー/から (fix_wave_dash)</label>
+            <label><input id="iro-punct" type="checkbox" /> 三点リーダー・末尾記号整理 (normalize_punctuation)</label>
+            <label><input id="iro-units" type="checkbox" /> 単位の読み変換 10cm→10センチ (convert_units)</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="primary" onclick="saveSettings()">Save Settings to config.toml</button>
+        <button type="button" onclick="loadSettings()">Reload from Server</button>
+      </div>
+    </section>
+
+    <!-- 3. User Dictionary -->
+    <section>
+      <h2>
+        <span>User Pronunciation Dictionary ([[dictionary]])</span>
+        <span id="dict-count" style="font-size:12px;color:var(--muted);font-family:var(--mono)"></span>
+      </h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:34%">Surface (表記)</th>
+              <th style="width:38%">Reading (読み仮名)</th>
+              <th style="width:12%">Case Sens.</th>
+              <th style="width:10%">Enabled</th>
+              <th style="width:6%"></th>
+            </tr>
+          </thead>
+          <tbody id="dict-tbody"></tbody>
+        </table>
+      </div>
+      <div class="actions">
+        <button type="button" onclick="addDictRow()">+ Add Entry</button>
+        <button type="button" class="primary" onclick="saveSettings()">Save Dictionary &amp; Settings</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let currentAudioUrl = null;
+
+    function setToast(id, msg, isErr = false) {
+      const el = $(id);
+      el.textContent = msg;
+      el.className = isErr ? "toast err" : "toast";
+    }
+
+    function escapeAttr(s) {
+      return String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/"/g, "&quot;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function renderDictionary(entries) {
+      const tbody = $("dict-tbody");
+      tbody.innerHTML = "";
+      (entries || []).forEach((e) => appendDictTr(e));
+      updateDictCount();
+    }
+
+    function appendDictTr(entry) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="text" class="d-surface mono" value="${escapeAttr(entry.surface)}" placeholder="例: 東白川村" /></td>
+        <td><input type="text" class="d-reading" value="${escapeAttr(entry.reading)}" placeholder="例: ひがししらかわむら" /></td>
+        <td><input type="checkbox" class="d-case" ${entry.case_sensitive ? "checked" : ""} /></td>
+        <td><input type="checkbox" class="d-enabled" ${entry.enabled !== false ? "checked" : ""} /></td>
+        <td><button type="button" class="danger" onclick="this.closest('tr').remove(); updateDictCount();">✕</button></td>
+      `;
+      $("dict-tbody").appendChild(tr);
+    }
+
+    function addDictRow() {
+      appendDictTr({ surface: "", reading: "", case_sensitive: false, enabled: true });
+      updateDictCount();
+    }
+
+    function updateDictCount() {
+      const rows = $("dict-tbody").querySelectorAll("tr").length;
+      $("dict-count").textContent = `${rows} entries (longest match first)`;
+    }
+
+    function collectPayload() {
+      const dictionary = [];
+      $("dict-tbody").querySelectorAll("tr").forEach((tr) => {
+        const surface = tr.querySelector(".d-surface").value.trim();
+        const reading = tr.querySelector(".d-reading").value;
+        if (surface) {
+          dictionary.push({
+            surface,
+            reading,
+            case_sensitive: tr.querySelector(".d-case").checked,
+            enabled: tr.querySelector(".d-enabled").checked,
+          });
+        }
+      });
+
+      return {
+        general: {
+          default_engine: $("gen-default-engine").value,
+          default_voice: $("gen-default-voice").value.trim() || "default",
+          default_language: $("gen-default-lang").value.trim() || "ja",
+        },
+        engines: {
+          zonos: {
+            url: $("z1-url").value.trim(),
+            default_speaking_rate: parseFloat($("z1-rate").value) || 15.0,
+            default_pitch_std: parseFloat($("z1-pitch").value) || 45.0,
+            chunk_silence_ms: parseInt($("z1-silence").value, 10) || 0,
+            use_dictionary: $("z1-dict").checked,
+            fix_wave_dash: $("z1-wave").checked,
+            normalize_punctuation: $("z1-punct").checked,
+            convert_units: $("z1-units").checked,
+          },
+          zonos2: {
+            url: $("z2-url").value.trim(),
+            default_speed: parseFloat($("z2-speed").value) || 1.15,
+            use_dictionary: $("z2-dict").checked,
+            fix_wave_dash: $("z2-wave").checked,
+            normalize_punctuation: $("z2-punct").checked,
+            convert_units: $("z2-units").checked,
+          },
+          irodori: {
+            url: $("iro-url").value.trim(),
+            model: $("iro-model").value.trim() || "irodori-tts",
+            default_speed: parseFloat($("iro-speed").value) || 1.0,
+            use_dictionary: $("iro-dict").checked,
+            fix_wave_dash: $("iro-wave").checked,
+            normalize_punctuation: $("iro-punct").checked,
+            convert_units: $("iro-units").checked,
+          },
+        },
+        dictionary,
+      };
+    }
+
+    function populateSettings(data) {
+      $("gen-default-engine").value = data.general.default_engine;
+      $("gen-default-voice").value = data.general.default_voice;
+      $("gen-default-lang").value = data.general.default_language;
+
+      const z1 = data.engines.zonos;
+      $("z1-url").value = z1.url;
+      $("z1-rate").value = z1.default_speaking_rate;
+      $("z1-pitch").value = z1.default_pitch_std;
+      $("z1-silence").value = z1.chunk_silence_ms;
+      $("z1-dict").checked = z1.use_dictionary;
+      $("z1-wave").checked = z1.fix_wave_dash;
+      $("z1-punct").checked = z1.normalize_punctuation;
+      $("z1-units").checked = z1.convert_units;
+
+      const z2 = data.engines.zonos2;
+      $("z2-url").value = z2.url;
+      $("z2-speed").value = z2.default_speed;
+      $("z2-dict").checked = z2.use_dictionary;
+      $("z2-wave").checked = z2.fix_wave_dash;
+      $("z2-punct").checked = z2.normalize_punctuation;
+      $("z2-units").checked = z2.convert_units;
+
+      const iro = data.engines.irodori;
+      $("iro-url").value = iro.url;
+      $("iro-model").value = iro.model;
+      $("iro-speed").value = iro.default_speed;
+      $("iro-dict").checked = iro.use_dictionary;
+      $("iro-wave").checked = iro.fix_wave_dash;
+      $("iro-punct").checked = iro.normalize_punctuation;
+      $("iro-units").checked = iro.convert_units;
+
+      renderDictionary(data.dictionary);
+    }
+
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error?.message || res.statusText);
+        populateSettings(data);
+        setToast("save-status", "Loaded current settings");
+      } catch (err) {
+        setToast("save-status", "Load error: " + err.message, true);
+      }
+    }
+
+    async function saveSettings() {
+      setToast("save-status", "Saving...");
+      try {
+        const payload = collectPayload();
+        const res = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error?.message || res.statusText);
+        populateSettings(data);
+        setToast("save-status", "Saved & hot-reloaded at " + new Date().toLocaleTimeString());
+        refreshHealth();
+      } catch (err) {
+        setToast("save-status", "Save failed: " + err.message, true);
+      }
+    }
+
+    async function refreshHealth() {
+      try {
+        const res = await fetch("/health");
+        const data = await res.json();
+        const setDot = (id, ok) => {
+          $(id).className = ok ? "dot up" : "dot down";
+        };
+        setDot("dot-zonos", data?.engines?.zonos?.connected);
+        setDot("dot-zonos2", data?.engines?.zonos2?.connected);
+        setDot("dot-irodori", data?.engines?.irodori?.connected);
+      } catch (_) {
+        ["dot-zonos", "dot-zonos2", "dot-irodori"].forEach((id) => ($(id).className = "dot down"));
+      }
+    }
+
+    function buildTestBody() {
+      const body = {
+        model: $("test-model").value,
+        input: $("test-input").value,
+        speed: parseFloat($("test-speed").value) || 1.0,
+      };
+      const voice = $("test-voice").value.trim();
+      if (voice) body.voice = voice;
+      const lang = $("test-lang").value;
+      if (lang) body.language = lang;
+      return body;
+    }
+
+    async function runPreview() {
+      setToast("play-status", "Running preview...");
+      try {
+        const res = await fetch("/api/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildTestBody()),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.error?.message || res.statusText);
+        const out = $("preview-output");
+        out.style.display = "block";
+        out.textContent = JSON.stringify(data, null, 2);
+        setToast("play-status", `Preview OK (${data.engine})`);
+      } catch (err) {
+        setToast("play-status", "Preview error: " + err.message, true);
+      }
+    }
+
+    async function runSynthesize() {
+      setToast("play-status", "Synthesizing on backend...");
+      const t0 = performance.now();
+      try {
+        const res = await fetch("/v1/audio/speech", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildTestBody()),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || `HTTP ${res.status}`);
+        }
+        const tags = res.headers.get("x-emotion-tags") || "(none)";
+        const blob = await res.blob();
+        if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+        currentAudioUrl = URL.createObjectURL(blob);
+        const player = $("audio-player");
+        player.style.display = "inline-block";
+        player.src = currentAudioUrl;
+        player.play().catch(() => {});
+        const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+        setToast("play-status", `OK in ${elapsed}s | tags: ${tags}`);
+      } catch (err) {
+        setToast("play-status", "Synth error: " + err.message, true);
+      }
+    }
+
+    loadSettings();
+    refreshHealth();
+  </script>
+</body>
+</html>

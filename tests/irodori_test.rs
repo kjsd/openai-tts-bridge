@@ -24,6 +24,7 @@ fn create_irodori_test_config(irodori_url: String) -> Config {
         log_level: "error".to_string(),
         max_body_size_mb: 100,
         default_speed: 1.0,
+        ..Config::default()
     }
 }
 
