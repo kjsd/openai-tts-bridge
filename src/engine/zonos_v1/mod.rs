@@ -11,7 +11,9 @@ use crate::config::Config;
 use crate::engine::zonos_v1::client::{ZonosV1Client, ZonosV1Params};
 use crate::engine::{PreviewResult, SynthesisRequest, SynthesisResult, TtsEngine};
 use crate::error::AppError;
-use crate::normalizer::{apply_engine_normalization, split_zonos_v1_chunks, strip_markdown};
+use crate::normalizer::{
+    apply_engine_normalization, is_speakable, split_zonos_v1_chunks, strip_markdown,
+};
 use crate::parser::EmotionParser;
 use crate::settings::{CompiledSettings, RuntimeSettings};
 
@@ -64,9 +66,22 @@ impl ZonosV1Engine {
             pitch_std: base_pitch,
         };
 
+        let has_non_mood_tags = tags
+            .iter()
+            .any(|t| !t.trim().to_ascii_lowercase().starts_with("mood:"));
+
         for raw_tag in tags {
-            for word in raw_tag
-                .to_ascii_lowercase()
+            let lower_tag = raw_tag.trim().to_ascii_lowercase();
+            let (tag_body, weight): (&str, f32) =
+                if let Some(inner) = lower_tag.strip_prefix("mood:") {
+                    let w = if has_non_mood_tags { 0.30 } else { 0.75 };
+                    (inner, w)
+                } else {
+                    (lower_tag.as_str(), 1.0)
+                };
+
+            let before = p.clone();
+            for word in tag_body
                 .split(|c: char| !c.is_ascii_alphabetic() && c != '-')
                 .filter(|s| !s.is_empty())
             {
@@ -89,7 +104,7 @@ impl ZonosV1Engine {
                         p.speaking_rate -= 2.0;
                         p.pitch_std -= 20.0;
                     }
-                    "cry" | "sobbing" => {
+                    "cry" | "crying" | "sobbing" => {
                         p.sadness += 1.0;
                         p.speaking_rate -= 3.0;
                         p.pitch_std -= 10.0;
@@ -105,7 +120,7 @@ impl ZonosV1Engine {
                         p.speaking_rate += 3.0;
                         p.pitch_std += 30.0;
                     }
-                    "mad" | "shout" => {
+                    "mad" | "shout" | "shouting" => {
                         p.anger += 0.9;
                         p.speaking_rate += 4.0;
                         p.pitch_std += 40.0;
@@ -116,7 +131,7 @@ impl ZonosV1Engine {
                         p.speaking_rate += 1.5;
                         p.pitch_std += 15.0;
                     }
-                    "pout" | "sulking" | "dissatisfaction-hnn" => {
+                    "pout" | "pouting" | "sulking" | "displeased" | "dissatisfaction-hnn" => {
                         p.anger += 0.4;
                         p.sadness += 0.3;
                         p.speaking_rate -= 1.0;
@@ -127,7 +142,7 @@ impl ZonosV1Engine {
                         p.speaking_rate += 2.0;
                         p.pitch_std += 10.0;
                     }
-                    "scared" => {
+                    "scared" | "panicked" => {
                         p.fear += 0.9;
                         p.speaking_rate += 1.0;
                     }
@@ -135,15 +150,15 @@ impl ZonosV1Engine {
                         p.surprise += 0.9;
                         p.pitch_std += 15.0;
                     }
-                    "shock" => {
+                    "shock" | "shocked" => {
                         p.surprise += 1.0;
                         p.speaking_rate -= 2.0;
                     }
-                    "disgust" => {
+                    "disgust" | "disgusted" => {
                         p.disgust += 0.9;
                         p.speaking_rate -= 3.0;
                     }
-                    "excited" => {
+                    "excited" | "excitedly" => {
                         p.happiness += 0.5;
                         p.surprise += 0.3;
                         p.speaking_rate += 3.0;
@@ -160,13 +175,13 @@ impl ZonosV1Engine {
                         p.speaking_rate += 1.5;
                         p.pitch_std += 15.0;
                     }
-                    "lovely" => {
+                    "lovely" | "loving" => {
                         p.happiness += 0.7;
                         p.other += 0.2;
                         p.speaking_rate -= 1.0;
                         p.pitch_std += 10.0;
                     }
-                    "kindly" | "gently" | "gentle" => {
+                    "kindly" | "gently" | "gentle" | "tenderly" | "warmly" => {
                         p.happiness += 0.5;
                         p.neutral += 0.3;
                         p.speaking_rate -= 1.0;
@@ -180,7 +195,7 @@ impl ZonosV1Engine {
                     "neutral" => {
                         p.neutral += 0.6;
                     }
-                    "relaxed" => {
+                    "relaxed" | "relieved" => {
                         p.neutral += 0.5;
                         p.happiness += 0.2;
                         p.speaking_rate -= 1.0;
@@ -227,7 +242,7 @@ impl ZonosV1Engine {
                         p.speaking_rate -= 1.0;
                         p.pitch_std += 5.0;
                     }
-                    "sarcastic" => {
+                    "sarcastic" | "exasperated" => {
                         p.neutral += 0.5;
                         p.disgust += 0.2;
                         p.other += 0.2;
@@ -264,7 +279,14 @@ impl ZonosV1Engine {
                         p.speaking_rate -= 3.0;
                         p.pitch_std += 15.0;
                     }
-                    "whisper" | "shy" | "shyly" => {
+                    "shy" | "shyly" | "bashful" | "embarrassed" => {
+                        p.happiness += 0.35;
+                        p.surprise += 0.25;
+                        p.other += 0.2;
+                        p.speaking_rate -= 1.5;
+                        p.pitch_std += 5.0;
+                    }
+                    "whisper" | "whispering" | "hushed" => {
                         p.neutral += 0.5;
                         p.other += 0.4;
                         p.speaking_rate -= 3.0;
@@ -295,8 +317,8 @@ impl ZonosV1Engine {
                     "fast" | "hurriedly" => {
                         p.speaking_rate += 5.0;
                     }
-                    "slow" | "slowly" => {
-                        p.speaking_rate -= 5.0;
+                    "slow" | "slowly" | "sleepy" | "sleepily" => {
+                        p.speaking_rate -= 4.0;
                     }
                     "flat" => {
                         p.pitch_std -= 30.0;
@@ -306,6 +328,20 @@ impl ZonosV1Engine {
                     }
                     _ => {}
                 }
+            }
+
+            if (weight - 1.0).abs() > f32::EPSILON {
+                p.happiness = before.happiness + (p.happiness - before.happiness) * weight;
+                p.sadness = before.sadness + (p.sadness - before.sadness) * weight;
+                p.disgust = before.disgust + (p.disgust - before.disgust) * weight;
+                p.fear = before.fear + (p.fear - before.fear) * weight;
+                p.surprise = before.surprise + (p.surprise - before.surprise) * weight;
+                p.anger = before.anger + (p.anger - before.anger) * weight;
+                p.other = before.other + (p.other - before.other) * weight;
+                p.neutral = before.neutral + (p.neutral - before.neutral) * weight;
+                p.speaking_rate =
+                    before.speaking_rate + (p.speaking_rate - before.speaking_rate) * weight;
+                p.pitch_std = before.pitch_std + (p.pitch_std - before.pitch_std) * weight;
             }
         }
 
@@ -338,44 +374,66 @@ impl ZonosV1Engine {
         &self,
         req: &SynthesisRequest,
         cfg: &CompiledSettings,
-    ) -> Result<(Vec<String>, Vec<String>, ZonosV1Params, String), AppError> {
+    ) -> Result<(Vec<(String, ZonosV1Params)>, Vec<String>, String), AppError> {
         if req.text.trim().is_empty() {
             return Err(AppError::BadRequest("Input text cannot be empty".to_string()));
         }
 
         let sanitized = strip_markdown(&req.text);
-        let parsed = EmotionParser::parse(&sanitized);
-        if parsed.cleaned_text.trim().is_empty() {
+        let parsed_chunks = EmotionParser::parse_chunks(&sanitized);
+        let z_cfg = &cfg.raw.engines.zonos;
+
+        let mut all_detected_tags = Vec::new();
+        let mut prepared_chunks: Vec<(String, ZonosV1Params)> = Vec::new();
+
+        for parsed in parsed_chunks {
+            all_detected_tags.extend(parsed.detected_tags.iter().cloned());
+
+            if parsed.cleaned_text.trim().is_empty() {
+                continue;
+            }
+
+            let normalized = apply_engine_normalization(
+                &parsed.cleaned_text,
+                &cfg.dictionary,
+                z_cfg.norm_flags(),
+            );
+
+            let sub_chunks = if z_cfg.normalize_punctuation {
+                split_zonos_v1_chunks(&normalized)
+            } else {
+                let trimmed = normalized.trim().to_string();
+                if is_speakable(&trimmed) {
+                    vec![trimmed]
+                } else {
+                    Vec::new()
+                }
+            };
+
+            if sub_chunks.is_empty() {
+                continue;
+            }
+
+            // Compute Zonos v0.1 parameters from THIS chunk's effective Carry + OneShot tags
+            let chunk_params = Self::resolve_params(
+                &parsed.effective_tags,
+                z_cfg.default_speaking_rate,
+                z_cfg.default_pitch_std,
+                req.speed,
+            );
+
+            for sc in sub_chunks {
+                if !sc.is_empty() {
+                    prepared_chunks.push((sc, chunk_params.clone()));
+                }
+            }
+        }
+
+        if prepared_chunks.is_empty() {
             return Err(AppError::BadRequest(
                 "Input text contains only emotion tags without speakable content".to_string(),
             ));
         }
-
-        let z_cfg = &cfg.raw.engines.zonos;
-        let normalized = apply_engine_normalization(
-            &parsed.cleaned_text,
-            &cfg.dictionary,
-            z_cfg.norm_flags(),
-        );
-
-        let chunks = if z_cfg.normalize_punctuation {
-            split_zonos_v1_chunks(&normalized)
-        } else {
-            vec![normalized.trim().to_string()]
-        };
-
-        if chunks.is_empty() || chunks.iter().all(|c| c.is_empty()) {
-            return Err(AppError::BadRequest(
-                "Input text has no speakable characters after normalization".to_string(),
-            ));
-        }
-
-        let params = Self::resolve_params(
-            &parsed.detected_tags,
-            z_cfg.default_speaking_rate,
-            z_cfg.default_pitch_std,
-            req.speed,
-        );
 
         let lang_raw = req
             .language
@@ -384,7 +442,7 @@ impl ZonosV1Engine {
             .unwrap_or(&cfg.raw.general.default_language);
         let lang_code = Self::normalize_lang(lang_raw);
 
-        Ok((chunks, parsed.detected_tags, params, lang_code))
+        Ok((prepared_chunks, all_detected_tags, lang_code))
     }
 }
 
@@ -403,7 +461,28 @@ impl TtsEngine for ZonosV1Engine {
         req: &SynthesisRequest,
         settings: &CompiledSettings,
     ) -> Result<PreviewResult, AppError> {
-        let (chunks, detected_tags, params, lang_code) = self.prepare_pipeline(req, settings)?;
+        let (prepared_chunks, detected_tags, lang_code) = self.prepare_pipeline(req, settings)?;
+        let chunks: Vec<String> = prepared_chunks.iter().map(|(c, _)| c.clone()).collect();
+        let first_params = &prepared_chunks[0].1;
+        let chunk_params: Vec<serde_json::Value> = prepared_chunks
+            .iter()
+            .map(|(text, p)| {
+                json!({
+                    "text": text,
+                    "speaking_rate": p.speaking_rate,
+                    "pitch_std": p.pitch_std,
+                    "happiness": p.happiness,
+                    "sadness": p.sadness,
+                    "anger": p.anger,
+                    "surprise": p.surprise,
+                    "fear": p.fear,
+                    "disgust": p.disgust,
+                    "other": p.other,
+                    "neutral": p.neutral,
+                })
+            })
+            .collect();
+
         Ok(PreviewResult {
             engine: "zonos".to_string(),
             processed_text: chunks.join(" "),
@@ -411,18 +490,19 @@ impl TtsEngine for ZonosV1Engine {
             detected_tags,
             parameters: json!({
                 "language": lang_code,
-                "speaking_rate": params.speaking_rate,
-                "pitch_std": params.pitch_std,
+                "speaking_rate": first_params.speaking_rate,
+                "pitch_std": first_params.pitch_std,
                 "emotions": {
-                    "happiness": params.happiness,
-                    "sadness": params.sadness,
-                    "disgust": params.disgust,
-                    "fear": params.fear,
-                    "surprise": params.surprise,
-                    "anger": params.anger,
-                    "other": params.other,
-                    "neutral": params.neutral,
-                }
+                    "happiness": first_params.happiness,
+                    "sadness": first_params.sadness,
+                    "disgust": first_params.disgust,
+                    "fear": first_params.fear,
+                    "surprise": first_params.surprise,
+                    "anger": first_params.anger,
+                    "other": first_params.other,
+                    "neutral": first_params.neutral,
+                },
+                "chunk_parameters": chunk_params,
             }),
         })
     }
@@ -433,7 +513,7 @@ impl TtsEngine for ZonosV1Engine {
             .read()
             .expect("settings RwLock poisoned")
             .clone();
-        let (chunks, detected_tags, params, lang_code) = self.prepare_pipeline(&req, &cfg)?;
+        let (prepared_chunks, detected_tags, lang_code) = self.prepare_pipeline(&req, &cfg)?;
         let base_url = &cfg.raw.engines.zonos.url;
 
         let raw_custom_bytes: Option<Vec<u8>> = if let Some(ref bytes) = req.custom_speaker_audio_bytes
@@ -463,23 +543,24 @@ impl TtsEngine for ZonosV1Engine {
             );
         }
 
+        let chunk_texts: Vec<&str> = prepared_chunks.iter().map(|(c, _)| c.as_str()).collect();
+        let processed_text = chunk_texts.join(" ");
+
         info!(
             engine = self.name(),
-            chunks_count = chunks.len(),
+            chunks_count = prepared_chunks.len(),
             lang = %lang_code,
             has_custom_audio = uploaded_speaker.is_some(),
             tags = ?detected_tags,
-            speaking_rate = %params.speaking_rate,
-            pitch_std = %params.pitch_std,
             "Zonos v0.1: processing TTS request"
         );
 
-        let mut wav_chunks = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
+        let mut wav_chunks = Vec::with_capacity(prepared_chunks.len());
+        for (chunk_text, chunk_params) in &prepared_chunks {
             let speaker_val = uploaded_speaker.as_ref().map(|(_, v)| v);
             let chunk_res = self
                 .client
-                .generate_chunk_wav(base_url, chunk, &lang_code, &params, speaker_val)
+                .generate_chunk_wav(base_url, chunk_text, &lang_code, chunk_params, speaker_val)
                 .await;
 
             let wav_bytes = match chunk_res {
@@ -499,7 +580,13 @@ impl TtsEngine for ZonosV1Engine {
                         .await?;
                     let retry_res = self
                         .client
-                        .generate_chunk_wav(base_url, chunk, &lang_code, &params, Some(&fresh.1))
+                        .generate_chunk_wav(
+                            base_url,
+                            chunk_text,
+                            &lang_code,
+                            chunk_params,
+                            Some(&fresh.1),
+                        )
                         .await?;
                     uploaded_speaker = Some(fresh);
                     retry_res
@@ -516,7 +603,7 @@ impl TtsEngine for ZonosV1Engine {
             audio_bytes: merged_wav,
             content_type: "audio/wav".to_string(),
             detected_tags,
-            processed_text: chunks.join(" "),
+            processed_text,
         })
     }
 

@@ -349,3 +349,106 @@ async fn test_webui_settings_hot_reload_toml_persistence_and_preview() {
 
     let _ = std::fs::remove_file(&tmp_toml);
 }
+
+#[tokio::test]
+async fn test_carry_tag_propagation_across_all_three_engines_preview() {
+    let app = create_router(Arc::new(AppState::new(Config::default())));
+    let multi_sentence_input =
+        "[mood:gently] [whisper] ねえパパ。 [laughter] ふふっ！ ずっと一緒だよ。 [calm] さて本題だよ。";
+
+    // 1. Zonos 2: 4 chunks, accurate_mode=false on all, Carry [whisper] persists to chunk 2, [calm] resets chunk 3
+    let z2_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/preview")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "model": "zonos2",
+                        "input": multi_sentence_input
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(z2_resp.status(), StatusCode::OK);
+    let z2_json: Value =
+        serde_json::from_slice(&z2_resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let z2_chunks = z2_json["parameters"]["chunk_parameters"].as_array().unwrap();
+    assert_eq!(z2_chunks.len(), 4);
+    assert_eq!(z2_chunks[0]["emotion_enabled"], true);
+    assert_eq!(z2_chunks[0]["accurate_mode"], false);
+    assert_eq!(z2_chunks[1]["emotion_enabled"], true);
+    assert_eq!(z2_chunks[2]["emotion_enabled"], true);
+    // Chunk 2 ("ずっと一緒だよ。") inherits Carry [whisper] + BaseMood [gently] without [laughter]
+    assert_eq!(
+        z2_chunks[2]["emotion_sliders"]["happy"],
+        z2_chunks[0]["emotion_sliders"]["happy"]
+    );
+    // Chunk 3 ("[calm] さて本題だよ。") resets to calm while keeping accurate_mode=false!
+    assert_eq!(z2_chunks[3]["emotion_enabled"], false);
+    assert_eq!(z2_chunks[3]["accurate_mode"], false);
+
+    // 2. Zonos v0.1: 4 chunks, Carry [whisper] lowers speaking_rate on chunks 0..=2, [calm] restores default 15.0 on chunk 3
+    let z1_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/preview")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "model": "zonos",
+                        "input": multi_sentence_input
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(z1_resp.status(), StatusCode::OK);
+    let z1_json: Value =
+        serde_json::from_slice(&z1_resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let z1_chunks = z1_json["parameters"]["chunk_parameters"].as_array().unwrap();
+    assert_eq!(z1_chunks.len(), 4);
+    assert!(z1_chunks[0]["speaking_rate"].as_f64().unwrap() < 15.0);
+    assert!(z1_chunks[2]["speaking_rate"].as_f64().unwrap() < 15.0);
+    // Chunk 2 does NOT have chunk 1's [laughter] happiness spike!
+    assert!(
+        z1_chunks[1]["happiness"].as_f64().unwrap() > z1_chunks[2]["happiness"].as_f64().unwrap()
+    );
+    // Chunk 3 ([calm]) returns to baseline speaking_rate = 15.0
+    assert_eq!(z1_chunks[3]["speaking_rate"].as_f64().unwrap(), 15.0);
+
+    // 3. Irodori: Carry 👂 propagates across sentences 0..=2, [laughter] adds 😆 on sentence 1, [calm] strips cleanly on sentence 3
+    let iro_resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/preview")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "model": "irodori-tts",
+                        "input": multi_sentence_input
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(iro_resp.status(), StatusCode::OK);
+    let iro_json: Value =
+        serde_json::from_slice(&iro_resp.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        iro_json["processed_text"],
+        "👂 ねえパパ。 👂 😆 ふふっ！ 👂 ずっと一緒だよ。 さて本題だよ。"
+    );
+}
