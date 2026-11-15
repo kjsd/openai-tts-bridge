@@ -1,0 +1,66 @@
+# openai-tts-bridge v0.3 Runtime Configuration Example
+# Copy to `config.toml` (or save directly from the built-in Web UI at http://localhost:8080/)
+
+[general]
+default_engine = "zonos2"   # "zonos" | "zonos2" | "irodori"
+default_voice = "nina"
+default_language = "ja"
+
+[engines.zonos]
+url = "http://127.0.0.1:7860"
+default_speaking_rate = 15.0
+default_pitch_std = 45.0
+chunk_silence_ms = 100
+use_dictionary = true
+fix_wave_dash = true
+normalize_punctuation = true
+convert_units = true
+
+[engines.zonos2]
+url = "http://127.0.0.1:1919"
+default_speed = 1.15
+use_dictionary = true
+fix_wave_dash = true
+normalize_punctuation = true
+convert_units = true
+
+[engines.irodori]
+url = "http://127.0.0.1:8088"
+model = "irodori-tts"
+default_speed = 1.0
+# Irodori-TTS natively handles Japanese prosody (`〜`, `…`) accurately,
+# so only user dictionary substitution is enabled by default.
+use_dictionary = true
+fix_wave_dash = false
+normalize_punctuation = false
+convert_units = false
+
+[[dictionary]]
+surface = "東白川村"
+reading = "ひがししらかわむら"
+case_sensitive = true
+enabled = true
+
+[[dictionary]]
+surface = "東白川"
+reading = "ひがししらかわ"
+case_sensitive = true
+enabled = true
+
+[[dictionary]]
+surface = "mBot2"
+reading = "エムボットツー"
+case_sensitive = false
+enabled = true
+
+[[dictionary]]
+surface = "K.I.T.T."
+reading = "キット"
+case_sensitive = false
+enabled = true
+
+[[dictionary]]
+surface = "AI"
+reading = "エーアイ"
+case_sensitive = true
+enabled = true

@@ -4,21 +4,35 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub async fn handle_models(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let irodori_model = state.irodori_engine.default_model();
-    let zonos_model = state.zonos_engine.default_model();
+    let cfg = state.current_settings();
+    let irodori_model = cfg.raw.engines.irodori.model.as_str();
+    let zonos2_model = state.zonos_engine.default_model();
+    let zonos_v1_model = state.zonos_v1_engine.default_model();
 
     let mut models = vec![
+        json!({
+            "id": zonos_v1_model,
+            "object": "model",
+            "created": 1725400000,
+            "owned_by": "zonos"
+        }),
+        json!({
+            "id": "zonos-v0.1",
+            "object": "model",
+            "created": 1725400000,
+            "owned_by": "zonos"
+        }),
+        json!({
+            "id": zonos2_model,
+            "object": "model",
+            "created": 1725400000,
+            "owned_by": "zonos2"
+        }),
         json!({
             "id": irodori_model,
             "object": "model",
             "created": 1725400000,
             "owned_by": "irodori"
-        }),
-        json!({
-            "id": zonos_model,
-            "object": "model",
-            "created": 1725400000,
-            "owned_by": "zonos2"
         }),
     ];
 
@@ -31,7 +45,7 @@ pub async fn handle_models(State(state): State<Arc<AppState>>) -> Json<Value> {
         }));
     }
 
-    if zonos_model != "zonos2" {
+    if zonos2_model != "zonos2" {
         models.push(json!({
             "id": "zonos2",
             "object": "model",
