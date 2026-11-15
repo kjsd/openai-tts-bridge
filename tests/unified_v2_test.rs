@@ -452,3 +452,168 @@ async fn test_carry_tag_propagation_across_all_three_engines_preview() {
         "👂 ねえパパ。 👂 😆 ふふっ！ 👂 ずっと一緒だよ。 さて本題だよ。"
     );
 }
+
+#[tokio::test]
+async fn test_unified_on_demand_voice_enrollment_404_and_zonos2_speaker_cache() {
+    let mock_zonos2 = MockServer::start().await;
+
+    let speaker_upload_count = Arc::new(AtomicUsize::new(0));
+    let upload_counter_clone = speaker_upload_count.clone();
+    Mock::given(method("POST"))
+        .and(path("/tts/speakers"))
+        .respond_with(move |req: &wiremock::Request| {
+            let call_num = upload_counter_clone.fetch_add(1, Ordering::SeqCst) + 1;
+            assert_eq!(
+                req.headers
+                    .get("x-tts-session-id")
+                    .and_then(|v| v.to_str().ok()),
+                Some("openai-tts-bridge")
+            );
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["label"], "nina");
+            assert!(body["speaker_audio_base64"].as_str().is_some());
+            ResponseTemplate::new(200).set_body_json(json!({
+                "id": format!("spk_nina_v{call_num}"),
+                "label": "nina"
+            }))
+        })
+        .expect(2) // Once initially, and once after simulated Zonos 2 restart!
+        .mount(&mock_zonos2)
+        .await;
+
+    let mut fake_pcm = Vec::new();
+    fake_pcm.write_f32::<LittleEndian>(0.25).unwrap();
+    let gen_call_count = Arc::new(AtomicUsize::new(0));
+    let gen_counter_clone = gen_call_count.clone();
+    Mock::given(method("POST"))
+        .and(path("/tts/generate"))
+        .respond_with(move |req: &wiremock::Request| {
+            let call_idx = gen_counter_clone.fetch_add(1, Ordering::SeqCst);
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            // Must use cached speaker_embedding_id and NOT resend multi-MB speaker_audio_base64!
+            assert!(body.get("speaker_audio_base64").is_none());
+
+            if call_idx < 2 {
+                // First 2 chunks of utterance 1 use spk_nina_v1
+                assert_eq!(body["speaker_embedding_id"], "spk_nina_v1");
+                ResponseTemplate::new(200).set_body_bytes(fake_pcm.clone())
+            } else if call_idx == 2 {
+                // Simulate Zonos 2 backend restart purging spk_nina_v1
+                assert_eq!(body["speaker_embedding_id"], "spk_nina_v1");
+                ResponseTemplate::new(400).set_body_json(json!({
+                    "detail": "Unknown cached speaker id 'spk_nina_v1'."
+                }))
+            } else {
+                // Automatic re-enrollment retry uses spk_nina_v2!
+                assert_eq!(body["speaker_embedding_id"], "spk_nina_v2");
+                ResponseTemplate::new(200).set_body_bytes(fake_pcm.clone())
+            }
+        })
+        .expect(4)
+        .mount(&mock_zonos2)
+        .await;
+
+    let config = Config {
+        tts_engine: "zonos2".to_string(),
+        zonos_url: mock_zonos2.uri(),
+        ..Config::default()
+    };
+    let app = create_router(Arc::new(AppState::new(config)));
+
+    // 1. Unenrolled "nina" MUST return HTTP 404 voice_not_found on both zonos (v0.1) and zonos2!
+    for model_name in ["zonos", "zonos2", "irodori-tts"] {
+        let miss_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/audio/speech")
+                    .method("POST")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "model": model_name,
+                            "input": "賢嗣、聞こえる？",
+                            "voice": "nina"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(miss_resp.status(), StatusCode::NOT_FOUND);
+        let err_json: Value = serde_json::from_slice(
+            &miss_resp.into_body().collect().await.unwrap().to_bytes(),
+        )
+        .unwrap();
+        assert_eq!(err_json["error"]["code"], "voice_not_found");
+    }
+
+    // 2. Enroll "nina" via POST /v1/audio/voices (with generic filename `reference.wav`)
+    let boundary = "------------------------ninavoiceboundary";
+    let multipart_body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"voice_id\"\r\n\r\nnina\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"ref_audio\"; filename=\"reference.wav\"\r\nContent-Type: audio/wav\r\n\r\nRIFF_nina_reference_audio\r\n--{boundary}--\r\n"
+    );
+    let enroll_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/voices")
+                .method("POST")
+                .header(
+                    "Content-Type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(multipart_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(enroll_resp.status(), StatusCode::OK);
+
+    // 3. Multi-sentence request caches speaker ONCE (`spk_nina_v1`) and synthesizes both chunks
+    let ok_resp1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/speech")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "model": "zonos2",
+                        "input": "[whisper] ねえ賢嗣。 ずっと一緒だよ。",
+                        "voice": "nina"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ok_resp1.status(), StatusCode::OK);
+    assert_eq!(speaker_upload_count.load(Ordering::SeqCst), 1);
+
+    // 4. Subsequent request hits simulated Zonos 2 restart (HTTP 400 Unknown cached speaker id)
+    //    -> automatically re-uploads speaker (`spk_nina_v2`) and succeeds!
+    let ok_resp2 = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/audio/speech")
+                .method("POST")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "model": "zonos2",
+                        "input": "再起動しても大丈夫だよ！",
+                        "voice": "nina"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ok_resp2.status(), StatusCode::OK);
+    assert_eq!(speaker_upload_count.load(Ordering::SeqCst), 2);
+}

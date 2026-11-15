@@ -30,17 +30,18 @@ pub struct SpeechRequest {
     pub seed: Option<i64>,
 }
 
-/// Checks if a voice identifier matches SkyrimNet's dynamic voice ID conventions:
-/// - `snv1-<sha256>` (content-addressed hash ID)
-/// - `voice:<editorId>` (e.g., `voice:malebrute`, `voice:femaleeventoned`)
-/// - `actor:<formId>`, `fallback:<gender>`, `stored:<name>`, `test:<id>`
-fn is_skyrimnet_voice_id(v: &str) -> bool {
-    v.starts_with("snv1-")
-        || v.starts_with("voice:")
-        || v.starts_with("actor:")
-        || v.starts_with("fallback:")
-        || v.starts_with("stored:")
-        || v.starts_with("test:")
+/// Checks if a voice identifier is a generic OpenAI/placeholder voice name rather than
+/// a character-specific reference voice ID (`"nina"`, `"kitt-..."`, `"snv1-..."`, `"voice:..."`, etc.).
+///
+/// Any non-generic voice ID requested without inline `speaker_audio_base64` MUST exist in
+/// `state.enrolled_voices`; otherwise `POST /v1/audio/speech` returns HTTP 404 (`voice_not_found`)
+/// so clients (`SkyrimNet`, `nina_agent`, `kitt_agent`) automatically upload their reference WAV
+/// via `POST /v1/audio/voices` and retry synthesis.
+fn is_generic_default_voice(v: &str) -> bool {
+    matches!(
+        v.trim().to_ascii_lowercase().as_str(),
+        "" | "default" | "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer"
+    )
 }
 
 /// POST /v1/audio/voices
@@ -162,9 +163,14 @@ pub async fn handle_upload_voice(
                 lock.insert(t.clone(), bytes.clone());
             }
         }
-        if let Some(ref stem) = filename_stem {
-            if stem != &resolved_voice_id {
-                lock.insert(stem.clone(), bytes.clone());
+        // Only register filename stem as a secondary alias when no explicit `voice_id` was provided
+        // and the stem is a SkyrimNet `snv1-...` hash (or `title` was omitted), preventing generic
+        // filenames like `reference.wav` or `nina.wav` from overwriting another character's voice.
+        if explicit_voice_id.is_none() {
+            if let Some(ref stem) = filename_stem {
+                if stem != &resolved_voice_id && (stem.starts_with("snv1-") || title_field.is_none()) {
+                    lock.insert(stem.clone(), bytes.clone());
+                }
             }
         }
         lock.insert(resolved_voice_id.clone(), bytes);
@@ -208,11 +214,11 @@ pub async fn handle_speech(
                 let lock = state.enrolled_voices.lock().await;
                 if let Some(bytes) = lock.get(trimmed_v) {
                     custom_audio_bytes = Some(bytes.clone());
-                } else if is_skyrimnet_voice_id(trimmed_v) {
-                    // SkyrimNet enrolled voice ID (e.g. `snv1-...` or `voice:malebrute`) not found
-                    // in memory (such as after a bridge restart).
-                    // Return HTTP 404 with error.code = "voice_not_found" so SkyrimNet automatically
-                    // re-uploads the reference WAV via POST /v1/audio/voices and retries synthesis.
+                } else if !is_generic_default_voice(trimmed_v) {
+                    // Requested character voice ID (e.g. `nina`, `kitt-...`, `snv1-...`, `voice:...`)
+                    // is not yet enrolled in memory (such as on initial boot or after a bridge restart).
+                    // Return HTTP 404 with error.code = "voice_not_found" so the caller uploads its
+                    // reference WAV via POST /v1/audio/voices and retries synthesis.
                     return Err(AppError::VoiceNotFound(trimmed_v.to_string()));
                 }
             }

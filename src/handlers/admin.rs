@@ -54,6 +54,7 @@ pub async fn handle_put_settings(
 
     let prev = state.current_settings();
     let zonos_v1_url_changed = prev.raw.engines.zonos.url != compiled.raw.engines.zonos.url;
+    let zonos2_url_changed = prev.raw.engines.zonos2.url != compiled.raw.engines.zonos2.url;
     let irodori_url_changed = prev.raw.engines.irodori.url != compiled.raw.engines.irodori.url;
 
     let response_raw = compiled.raw.clone();
@@ -64,6 +65,9 @@ pub async fn handle_put_settings(
 
     if zonos_v1_url_changed {
         state.zonos_v1_concrete.clear_voice_cache().await;
+    }
+    if zonos2_url_changed {
+        state.zonos2_concrete.clear_voice_cache().await;
     }
     if irodori_url_changed {
         state.irodori_concrete.clear_voice_cache().await;

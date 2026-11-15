@@ -18,6 +18,8 @@ pub struct AppState {
     pub gpu_lock: Arc<Mutex<()>>,
     /// Concrete Zonos v0.1 engine handle (for cache invalidation on URL change)
     pub zonos_v1_concrete: Arc<ZonosV1Engine>,
+    /// Concrete Zonos 2 engine handle (for speaker cache invalidation on URL change)
+    pub zonos2_concrete: Arc<ZonosEngine>,
     /// Concrete Irodori engine handle (for cache invalidation on URL change)
     pub irodori_concrete: Arc<IrodoriEngine>,
     /// Zonos v0.1 Gradio backend engine instance
@@ -85,7 +87,7 @@ impl AppState {
             Arc::new(IrodoriEngine::with_shared_state(settings.clone(), gpu_lock.clone()));
 
         let mut zonos_v1_engine: Arc<dyn TtsEngine> = zonos_v1_concrete.clone();
-        let mut zonos_engine: Arc<dyn TtsEngine> = zonos2_concrete;
+        let mut zonos_engine: Arc<dyn TtsEngine> = zonos2_concrete.clone();
         let mut irodori_engine: Arc<dyn TtsEngine> = irodori_concrete.clone();
         let mut custom_default_engine: Option<Arc<dyn TtsEngine>> = None;
 
@@ -104,6 +106,7 @@ impl AppState {
             settings,
             gpu_lock,
             zonos_v1_concrete,
+            zonos2_concrete,
             irodori_concrete,
             zonos_v1_engine,
             zonos_engine,

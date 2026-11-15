@@ -131,6 +131,14 @@ impl ZonosV1Client {
         let _guard = self.gpu_lock.lock().await;
         let clean_base = base_url.trim_end_matches('/');
 
+        let unconditional_keys = if speaker_audio.is_some() {
+            json!(["emotion"])
+        } else {
+            // Prevent Zonos v0.1 Gradio from reusing its global SPEAKER_EMBEDDING from a previous caller
+            // when no speaker reference audio is supplied.
+            json!(["speaker", "emotion"])
+        };
+
         let payload = json!({
             "data": [
                 "Zyphra/Zonos-v0.1-hybrid",
@@ -161,7 +169,7 @@ impl ZonosV1Client {
                 0.0,
                 420,
                 true,
-                ["emotion"]
+                unconditional_keys
             ]
         });
 

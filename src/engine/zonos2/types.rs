@@ -7,6 +7,8 @@ pub struct ZonosGenerateRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_embedding_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_embedding_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub speaker_audio_base64: Option<String>,
     pub language: String,
     pub emotion_enabled: bool,

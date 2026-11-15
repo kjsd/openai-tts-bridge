@@ -18,7 +18,7 @@ use crate::settings::{CompiledSettings, RuntimeSettings};
 pub mod client;
 pub mod types;
 
-pub use client::ZonosClient;
+pub use client::{ResolvedZonos2Speaker, ZonosClient};
 pub use types::ZonosGenerateRequest;
 
 const MULTI_CHUNK_SILENCE_MS: u32 = 60;
@@ -66,6 +66,45 @@ impl ZonosEngine {
             .clone();
         let client = Arc::new(ZonosClient::with_lock(initial_url, gpu_lock));
         Self { client, settings }
+    }
+
+    pub async fn clear_voice_cache(&self) {
+        self.client.clear_cache().await;
+    }
+
+    fn build_generate_request(
+        chunk: &PreparedZonos2Chunk,
+        language: &str,
+        default_voice: &str,
+        resolved_speaker: Option<&ResolvedZonos2Speaker>,
+    ) -> ZonosGenerateRequest {
+        let (speaker_embedding_name, speaker_embedding_id, speaker_audio_base64) =
+            match resolved_speaker {
+                Some(ResolvedZonos2Speaker::CachedId { speaker_id, .. }) => {
+                    (None, Some(speaker_id.clone()), None)
+                }
+                Some(ResolvedZonos2Speaker::InlineBase64(b64)) => {
+                    (None, None, Some(b64.clone()))
+                }
+                None => (Some(default_voice.to_string()), None, None),
+            };
+
+        ZonosGenerateRequest {
+            text: chunk.normalized_text.clone(),
+            speaker_embedding_name,
+            speaker_embedding_id,
+            speaker_audio_base64,
+            language: language.to_string(),
+            emotion_enabled: chunk.parsed.emotion_enabled,
+            emotion_sliders: chunk.parsed.emotion_sliders.clone(),
+            emotion_valence: chunk.parsed.emotion_valence,
+            emotion_arousal: chunk.parsed.emotion_arousal,
+            emotion_cfg_scale: chunk.parsed.emotion_cfg_scale,
+            speed: chunk.final_speed,
+            speaking_rate_enabled: true,
+            accurate_mode: chunk.parsed.accurate_mode,
+            stream: false,
+        }
     }
 
     fn normalize_lang(raw: &str) -> String {
@@ -218,27 +257,45 @@ impl TtsEngine for ZonosEngine {
 
         let prepared = self.prepare_pipeline(&req, &cfg)?;
 
-        // Resolve speaker reference audio
-        let custom_audio_b64 = if let Some(b64) = req.custom_speaker_audio_base64 {
-            let trimmed = b64.trim();
-            if !trimmed.is_empty() {
-                Some(trimmed.to_string())
+        let z2_url = &cfg.raw.engines.zonos2.url;
+
+        // Resolve speaker reference audio (prefer cached speaker_embedding_id via POST /tts/speakers)
+        let mut raw_custom_bytes: Option<Vec<u8>> = None;
+        let mut resolved_speaker: Option<ResolvedZonos2Speaker> = if let Some(ref bytes) =
+            req.custom_speaker_audio_bytes
+        {
+            if !bytes.is_empty() {
+                raw_custom_bytes = Some(bytes.clone());
+                Some(
+                    self.client
+                        .ensure_speaker_cached_at(z2_url, &prepared.voice, bytes, false)
+                        .await?,
+                )
             } else {
                 None
             }
-        } else if let Some(ref bytes) = req.custom_speaker_audio_bytes {
-            if !bytes.is_empty() {
-                Some(BASE64_STANDARD.encode(bytes))
+        } else if let Some(ref b64) = req.custom_speaker_audio_base64 {
+            let trimmed = b64.trim();
+            if !trimmed.is_empty() {
+                if let Ok(decoded) = BASE64_STANDARD.decode(trimmed) {
+                    if !decoded.is_empty() {
+                        let cached = self
+                            .client
+                            .ensure_speaker_cached_at(z2_url, &prepared.voice, &decoded, false)
+                            .await?;
+                        raw_custom_bytes = Some(decoded);
+                        Some(cached)
+                    } else {
+                        None
+                    }
+                } else {
+                    Some(ResolvedZonos2Speaker::InlineBase64(trimmed.to_string()))
+                }
             } else {
                 None
             }
         } else {
             None
-        };
-
-        let (speaker_embedding_name, speaker_audio_base64) = match custom_audio_b64 {
-            Some(b64) => (None, Some(b64)),
-            None => (Some(prepared.voice.clone()), None),
         };
 
         let processed_text = prepared
@@ -255,60 +312,64 @@ impl TtsEngine for ZonosEngine {
             chunk_count = prepared.chunks.len(),
             voice = %prepared.voice,
             language = %prepared.language,
-            has_custom_audio = speaker_audio_base64.is_some(),
+            has_custom_audio = resolved_speaker.is_some(),
             tags = ?prepared.all_detected_tags,
             "Zonos2: processing TTS request"
         );
 
-        let z2_url = &cfg.raw.engines.zonos2.url;
+        let mut wav_chunks = Vec::with_capacity(prepared.chunks.len());
+        for chunk in &prepared.chunks {
+            let zonos_req = Self::build_generate_request(
+                chunk,
+                &prepared.language,
+                &prepared.voice,
+                resolved_speaker.as_ref(),
+            );
 
-        // Fast single-chunk path (preserves zero-overhead WAV generation for streaming sentences)
-        let wav_data = if prepared.chunks.len() == 1 {
-            let chunk = &prepared.chunks[0];
-            let zonos_req = ZonosGenerateRequest {
-                text: chunk.normalized_text.clone(),
-                speaker_embedding_name,
-                speaker_audio_base64,
-                language: prepared.language,
-                emotion_enabled: chunk.parsed.emotion_enabled,
-                emotion_sliders: chunk.parsed.emotion_sliders.clone(),
-                emotion_valence: chunk.parsed.emotion_valence,
-                emotion_arousal: chunk.parsed.emotion_arousal,
-                emotion_cfg_scale: chunk.parsed.emotion_cfg_scale,
-                speed: chunk.final_speed,
-                speaking_rate_enabled: true,
-                accurate_mode: chunk.parsed.accurate_mode,
-                stream: false,
+            let raw_pcm = match self.client.generate_pcm_at(z2_url, &zonos_req).await {
+                Ok(pcm) => pcm,
+                Err(_first_err)
+                    if matches!(
+                        resolved_speaker,
+                        Some(ResolvedZonos2Speaker::CachedId { .. })
+                    ) && raw_custom_bytes.is_some() =>
+                {
+                    // Zonos 2 backend may have restarted and cleared its session speaker cache;
+                    // re-upload reference audio once via POST /tts/speakers and retry synthesis.
+                    if let Some(ResolvedZonos2Speaker::CachedId { ref cache_key, .. }) =
+                        resolved_speaker
+                    {
+                        self.client.invalidate_speaker(cache_key).await;
+                    }
+                    let refreshed = self
+                        .client
+                        .ensure_speaker_cached_at(
+                            z2_url,
+                            &prepared.voice,
+                            raw_custom_bytes.as_ref().unwrap(),
+                            true,
+                        )
+                        .await?;
+                    resolved_speaker = Some(refreshed);
+                    let retry_req = Self::build_generate_request(
+                        chunk,
+                        &prepared.language,
+                        &prepared.voice,
+                        resolved_speaker.as_ref(),
+                    );
+                    self.client.generate_pcm_at(z2_url, &retry_req).await?
+                }
+                Err(e) => return Err(e),
             };
 
-            let raw_pcm = self.client.generate_pcm_at(z2_url, &zonos_req).await?;
-            float32_to_pcm16_wav(&raw_pcm, 44100, 1).map_err(AppError::AudioConversionError)?
+            let chunk_wav =
+                float32_to_pcm16_wav(&raw_pcm, 44100, 1).map_err(AppError::AudioConversionError)?;
+            wav_chunks.push(chunk_wav);
+        }
+
+        let wav_data = if wav_chunks.len() == 1 {
+            wav_chunks.pop().unwrap()
         } else {
-            // Multi-sentence / mid-utterance Carry-shift path
-            let mut wav_chunks = Vec::with_capacity(prepared.chunks.len());
-            for chunk in &prepared.chunks {
-                let zonos_req = ZonosGenerateRequest {
-                    text: chunk.normalized_text.clone(),
-                    speaker_embedding_name: speaker_embedding_name.clone(),
-                    speaker_audio_base64: speaker_audio_base64.clone(),
-                    language: prepared.language.clone(),
-                    emotion_enabled: chunk.parsed.emotion_enabled,
-                    emotion_sliders: chunk.parsed.emotion_sliders.clone(),
-                    emotion_valence: chunk.parsed.emotion_valence,
-                    emotion_arousal: chunk.parsed.emotion_arousal,
-                    emotion_cfg_scale: chunk.parsed.emotion_cfg_scale,
-                    speed: chunk.final_speed,
-                    speaking_rate_enabled: true,
-                    accurate_mode: chunk.parsed.accurate_mode,
-                    stream: false,
-                };
-
-                let raw_pcm = self.client.generate_pcm_at(z2_url, &zonos_req).await?;
-                let chunk_wav = float32_to_pcm16_wav(&raw_pcm, 44100, 1)
-                    .map_err(AppError::AudioConversionError)?;
-                wav_chunks.push(chunk_wav);
-            }
-
             concat_wav_chunks(&wav_chunks, MULTI_CHUNK_SILENCE_MS)
                 .map_err(AppError::AudioConversionError)?
         };
