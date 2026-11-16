@@ -104,6 +104,12 @@ impl ZonosV1Engine {
                         p.speaking_rate -= 2.0;
                         p.pitch_std -= 20.0;
                     }
+                    "pleading" | "plead" => {
+                        p.sadness += 0.7;
+                        p.fear += 0.2;
+                        p.speaking_rate -= 1.5;
+                        p.pitch_std += 5.0;
+                    }
                     "cry" | "crying" | "sobbing" => {
                         p.sadness += 1.0;
                         p.speaking_rate -= 3.0;
@@ -125,6 +131,13 @@ impl ZonosV1Engine {
                         p.speaking_rate += 4.0;
                         p.pitch_std += 40.0;
                     }
+                    "screaming" | "scream" | "shriek" => {
+                        p.anger += 0.7;
+                        p.fear += 0.4;
+                        p.surprise += 0.4;
+                        p.speaking_rate += 3.0;
+                        p.pitch_std += 40.0;
+                    }
                     "irritated" => {
                         p.anger += 0.6;
                         p.disgust += 0.2;
@@ -137,12 +150,12 @@ impl ZonosV1Engine {
                         p.speaking_rate -= 1.0;
                         p.pitch_std += 10.0;
                     }
-                    "fear" | "trembling" => {
+                    "fear" | "trembling" | "stuttering" | "stutter" | "stammer" => {
                         p.fear += 0.9;
                         p.speaking_rate += 2.0;
                         p.pitch_std += 10.0;
                     }
-                    "scared" | "panicked" => {
+                    "scared" | "panicked" | "anxious" | "nervous" | "flustered" => {
                         p.fear += 0.9;
                         p.speaking_rate += 1.0;
                     }
@@ -325,6 +338,11 @@ impl ZonosV1Engine {
                     }
                     "dynamic" | "questioning" | "question-oh" => {
                         p.pitch_std += 20.0;
+                    }
+                    "humming" | "hum" | "singing" => {
+                        p.happiness += 0.5;
+                        p.other += 0.2;
+                        p.pitch_std += 15.0;
                     }
                     _ => {}
                 }

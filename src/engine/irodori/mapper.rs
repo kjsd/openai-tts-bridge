@@ -92,7 +92,7 @@ impl IrodoriMapper {
         let normalized = tag.trim().to_lowercase();
         match normalized.as_str() {
             // === Reset / Neutral tags: strip cleanly without emitting an emoji ===
-            "calm" | "calmly" | "neutral" | "normal" | "reset" | "emotion-calm" => None,
+            "calm" | "calmly" | "neutral" | "normal" | "default" | "reset" | "emotion-calm" => None,
 
             // === 1. 👂 : 囁き、耳元の音 (Whisper, sounds close to the ear) ===
             "👂" | "whisper" | "whispering" | "whispers" | "whispered" | "hushed" | "quiet"
@@ -137,12 +137,12 @@ impl IrodoriMapper {
 
             // === 7. 😏 : からかうように、甘えるように (Teasing, playfully sweet / coaxing) ===
             "😏" | "teasing" | "teasingly" | "tease" | "coaxing" | "coaxingly" | "coax"
-            | "playful" | "playfully" | "sweetly" | "spoiled" | "coy" | "coyly"
+            | "playful" | "playfully" | "sassy" | "sweetly" | "spoiled" | "coy" | "coyly"
             | "flirtatious" | "flirtatiously" | "flirty" | "seductive" | "seductively"
-            | "sultry" | "sarcastic" | "sarcastically" | "sarcasm" | "ironic" | "ironically"
-            | "wry" | "wryly" | "sly" | "slyly" | "smug" | "smugly" | "smirk" | "smirking"
-            | "mocking" | "mockingly" | "scoff" | "scoffs" | "scoffing" | "sneer" | "sneering"
-            | "patronizing" | "patronizingly"
+            | "sultry" | "sarcastic" | "sarcastically" | "sarcasm" | "sardonic" | "ironic"
+            | "ironically" | "wry" | "wryly" | "sly" | "slyly" | "smug" | "smugly" | "smirk"
+            | "smirking" | "mocking" | "mockingly" | "scoff" | "scoffs" | "scoffing" | "sneer"
+            | "sneering" | "patronizing" | "patronizingly"
             | "style-sarcastic" | "style-teasing" | "style-playful" | "style-mocking"
             | "からかい" | "からかう" | "からかうように" | "甘え" | "甘える" | "甘えるように"
             | "宥め" | "皮肉" | "ニヤリ" => Some("😏"),
@@ -179,9 +179,9 @@ impl IrodoriMapper {
             // === 13. 🫶 : 優しく (Gently, tenderly) ===
             "🫶" | "gentle" | "gently" | "tender" | "tenderly" | "soft" | "softly" | "warm"
             | "warmly" | "kind" | "kindly" | "affectionate" | "affectionately" | "loving"
-            | "lovingly" | "caring" | "caringly" | "soothing" | "soothingly" | "comforting"
-            | "comfortingly" | "reverent" | "reverently" | "sweet" | "emotion-affection"
-            | "優しく" | "慈しむ" | "穏やか" => Some("🫶"),
+            | "lovingly" | "lovely" | "caring" | "caringly" | "soothing" | "soothingly"
+            | "comforting" | "comfortingly" | "reverent" | "reverently" | "sweet"
+            | "emotion-affection" | "優しく" | "慈しむ" | "穏やか" => Some("🫶"),
 
             // === 14. 😭 : 嗚咽、泣き声、悲しみ (Sobbing, crying, sorrowfully / sadly) ===
             "😭" | "sad" | "sadly" | "sorrow" | "sorrowful" | "sorrowfully" | "mournful"
@@ -321,7 +321,8 @@ impl IrodoriMapper {
             "😊" | "cheerful" | "cheerfully" | "glad" | "gladly" | "happy" | "happily"
             | "delighted" | "delightedly" | "pleased" | "bright" | "brightly" | "warm smile"
             | "smile" | "smiling" | "hopeful" | "hopefully" | "optimistic" | "proud"
-            | "proudly" | "confident" | "confidently" | "regal" | "haughty"
+            | "proudly" | "confident" | "confidently" | "assertive" | "assertively"
+            | "assisting" | "helpful" | "polite" | "politely" | "regal" | "haughty"
             | "emotion-happy" | "emotion-cheerful" | "emotion-proud" | "emotion-contentment"
             | "楽しげ" | "楽しげに" | "楽しそう" | "嬉しそう" | "嬉しそうに" | "明るく" => Some("😊"),
 
@@ -822,5 +823,17 @@ mod tests {
         assert!(reactions.prompt_text.contains("😠"));
         assert!(reactions.prompt_text.contains("👌"));
         assert!(reactions.prompt_text.contains("🤔"));
+
+        // All kitt_agent non-neutral moods map cleanly to official Irodori emojis
+        for (kitt_mood, expected) in [
+            ("assisting", "😊"),
+            ("lovely", "🫶"),
+            ("sassy", "😏"),
+            ("assertive", "😊"),
+            ("sardonic", "😏"),
+            ("smirking", "😏"),
+        ] {
+            assert_eq!(IrodoriMapper::tag_to_emoji(kitt_mood), Some(expected));
+        }
     }
 }

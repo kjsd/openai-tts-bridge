@@ -617,3 +617,81 @@ async fn test_unified_on_demand_voice_enrollment_404_and_zonos2_speaker_cache() 
     assert_eq!(ok_resp2.status(), StatusCode::OK);
     assert_eq!(speaker_upload_count.load(Ordering::SeqCst), 2);
 }
+
+#[tokio::test]
+async fn test_zonos2_strict_emotion_directions_for_gasp_fear_disgust_and_kitt_moods() {
+    let mock_zonos2 = MockServer::start().await;
+
+    let mut fake_pcm = Vec::new();
+    fake_pcm.write_f32::<LittleEndian>(0.35).unwrap();
+
+    // Emulate real Zonos 2 backend's strict emotion_sliders validation!
+    Mock::given(method("POST"))
+        .and(path("/tts/generate"))
+        .respond_with(move |req: &wiremock::Request| {
+            let body: Value = serde_json::from_slice(&req.body).unwrap();
+            let allowed = ["happy", "sad", "angry", "surprised", "valence", "arousal"];
+
+            if let Some(sliders) = body["emotion_sliders"].as_object() {
+                for key in sliders.keys() {
+                    if !allowed.contains(&key.as_str()) {
+                        return ResponseTemplate::new(400).set_body_json(json!({
+                            "detail": format!(
+                                "Unknown emotion direction '{key}'. Available: ['happy', 'sad', 'angry', 'surprised', 'valence', 'arousal']."
+                            )
+                        }));
+                    }
+                }
+            }
+            ResponseTemplate::new(200).set_body_bytes(fake_pcm.clone())
+        })
+        .mount(&mock_zonos2)
+        .await;
+
+    let config = Config {
+        tts_engine: "zonos2".to_string(),
+        zonos_url: mock_zonos2.uri(),
+        ..Config::default()
+    };
+    let app = create_router(Arc::new(AppState::new(config)));
+
+    let test_utterances = [
+        // Exact production utterance that previously failed with HTTP 400 -> 502!
+        "[mood:happy] [gasp] へえーっ、ここでも十分お山の中なのに、越原や大明神の方はさらに数度も寒いんだね！",
+        "[fear] そ、そんな… [stutter] どうしよう！",
+        "[disgust] うわぁ、それはちょっと遠慮しておくよ！",
+        "[assisting] マイケル、ルート検索が完了しました！",
+        "[lovely] ずっと一緒だよ！",
+        "[sassy] ふふん、私にかかれば朝飯前ですよ！",
+        "[assertive] ただちに発進します！",
+        "[sardonic] まったく、無茶をしますね。",
+        "[smirking] 計画通りですね！",
+    ];
+
+    for utterance in test_utterances {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/audio/speech")
+                    .method("POST")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "model": "zonos2",
+                            "input": utterance,
+                            "voice": "default"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "Zonos 2 failed on utterance: {utterance}"
+        );
+    }
+}

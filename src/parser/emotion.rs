@@ -279,6 +279,31 @@ impl EmotionParser {
                     speed_factor: 1.0,
                 })
             }
+            // 1c. Carry Assertive (`kitt_agent` confident/decisive tone)
+            "assertive" | "assertively" => {
+                sliders.insert("happy".to_string(), 0.35);
+                sliders.insert("angry".to_string(), 0.2);
+                Some(EmotionProfile {
+                    layer: TagLayer::Carry,
+                    sliders,
+                    valence: Some(0.15),
+                    arousal: Some(0.35),
+                    cfg_scale: 1.08,
+                    speed_factor: 1.02,
+                })
+            }
+            // 1d. Carry Assisting / Helpful / Polite (`kitt_agent` primary partner mood)
+            "assisting" | "helpful" | "polite" | "politely" => {
+                sliders.insert("happy".to_string(), 0.35);
+                Some(EmotionProfile {
+                    layer: TagLayer::Carry,
+                    sliders,
+                    valence: Some(0.30),
+                    arousal: Some(0.05),
+                    cfg_scale: 1.05,
+                    speed_factor: 1.0,
+                })
+            }
 
             // 2a. One-Shot Chuckle / Giggle / Snicker
             "chuckle" | "chuckles" | "chuckling" | "giggle" | "giggles" | "giggling"
@@ -295,9 +320,9 @@ impl EmotionParser {
                     speed_factor: 1.0,
                 })
             }
-            // 2b. Carry Playful / Teasing / Coaxing / Flirty / Seductive
+            // 2b. Carry Playful / Teasing / Coaxing / Sassy / Flirty / Seductive
             "playful" | "playfully" | "teasing" | "teasingly" | "tease" | "coaxing"
-            | "coaxingly" | "coax" | "sweetly" | "coy" | "coyly" | "flirtatious"
+            | "coaxingly" | "coax" | "sassy" | "sweetly" | "coy" | "coyly" | "flirtatious"
             | "flirtatiously" | "flirty" | "seductive" | "seductively" | "sultry"
             | "amused" | "amusedly" | "emotion-amusement" | "emotion-arousal"
             | "style-playful" | "style-teasing" | "からかい" | "甘え" => {
@@ -357,12 +382,12 @@ impl EmotionParser {
                     speed_factor: 0.88,
                 })
             }
-            // 4c. Carry Gently / Tender / Warm / Loving (distinct from whisper!)
+            // 4c. Carry Gently / Tender / Warm / Loving / Lovely (distinct from whisper!)
             "gentle" | "gently" | "sweet" | "soft" | "softly" | "tender" | "tenderly"
             | "warm" | "warmly" | "kind" | "kindly" | "affectionate" | "affectionately"
-            | "loving" | "lovingly" | "caring" | "caringly" | "soothing" | "soothingly"
-            | "comforting" | "comfortingly" | "reverent" | "reverently" | "emotion-affection"
-            | "優しく" | "慈しむ" | "穏やか" => {
+            | "loving" | "lovingly" | "lovely" | "caring" | "caringly" | "soothing"
+            | "soothingly" | "comforting" | "comfortingly" | "reverent" | "reverently"
+            | "emotion-affection" | "優しく" | "慈しむ" | "穏やか" => {
                 sliders.insert("happy".to_string(), 0.5);
                 Some(EmotionProfile {
                     layer: TagLayer::Carry,
@@ -635,16 +660,17 @@ impl EmotionParser {
             }
 
             // 11. One-Shot Gasp / Pant / Breathless
+            // Note: Zonos 2 supports only ['happy', 'sad', 'angry', 'surprised', 'valence', 'arousal'].
+            // Map sharp breath/gasp onto `surprised` + high `arousal` without unsupported `'fear'`.
             "gasp" | "gasps" | "gasping" | "pant" | "pants" | "panting"
             | "heavy breathing" | "shortness of breath" | "breathless" | "breathlessly"
             | "out of breath" | "sharp intake of breath" | "sfx-gasp" | "sfx-pant"
             | "ハッ" | "息をのむ" | "息切れ" => {
-                sliders.insert("surprised".to_string(), 0.55);
-                sliders.insert("fear".to_string(), 0.25);
+                sliders.insert("surprised".to_string(), 0.65);
                 Some(EmotionProfile {
                     layer: TagLayer::OneShot,
                     sliders,
-                    valence: Some(-0.1),
+                    valence: Some(-0.05),
                     arousal: Some(0.55),
                     cfg_scale: 1.10,
                     speed_factor: 1.0,
@@ -654,13 +680,13 @@ impl EmotionParser {
             // 12a. One-Shot Stutter / Stammer
             "stutter" | "stutters" | "stuttering" | "stammer" | "stammering"
             | "どもり" => {
-                sliders.insert("fear".to_string(), 0.55);
-                sliders.insert("surprised".to_string(), 0.2);
+                sliders.insert("surprised".to_string(), 0.40);
+                sliders.insert("sad".to_string(), 0.30);
                 Some(EmotionProfile {
                     layer: TagLayer::OneShot,
                     sliders,
                     valence: Some(-0.35),
-                    arousal: Some(0.4),
+                    arousal: Some(0.40),
                     cfg_scale: 1.10,
                     speed_factor: 0.98,
                 })
@@ -672,12 +698,13 @@ impl EmotionParser {
             | "urgent" | "urgently" | "desperate" | "desperately"
             | "emotion-fear" | "emotion-anxious" | "emotion-nervous" | "emotion-panicked"
             | "恐れ" | "怖" | "恐怖" | "慌て" | "動揺" => {
-                sliders.insert("fear".to_string(), 0.65);
+                sliders.insert("surprised".to_string(), 0.45);
+                sliders.insert("sad".to_string(), 0.35);
                 Some(EmotionProfile {
                     layer: TagLayer::Carry,
                     sliders,
-                    valence: Some(-0.5),
-                    arousal: Some(0.5),
+                    valence: Some(-0.50),
+                    arousal: Some(0.50),
                     cfg_scale: 1.12,
                     speed_factor: 1.02,
                 })
@@ -685,12 +712,13 @@ impl EmotionParser {
 
             // 13. Carry Disgust
             "disgust" | "disgusted" | "emotion-disgust" | "嫌悪" => {
-                sliders.insert("disgust".to_string(), 0.65);
+                sliders.insert("angry".to_string(), 0.45);
+                sliders.insert("sad".to_string(), 0.25);
                 Some(EmotionProfile {
                     layer: TagLayer::Carry,
                     sliders,
-                    valence: Some(-0.6),
-                    arousal: Some(0.2),
+                    valence: Some(-0.60),
+                    arousal: Some(0.20),
                     cfg_scale: 1.10,
                     speed_factor: 1.0,
                 })
@@ -709,12 +737,13 @@ impl EmotionParser {
                     speed_factor: 0.96,
                 })
             }
-            // 14b. Carry Sarcastic / Mocking / Exasperated / Cold
-            "sarcastic" | "sarcastically" | "sarcasm" | "ironic" | "mocking" | "mockingly"
-            | "smug" | "smugly" | "smirk" | "exasperated" | "exasperatedly"
-            | "annoyed" | "cold" | "coldly" | "grim" | "grimly" | "dismissive" | "dismissively"
-            | "suspicious" | "suspiciously" | "style-sarcastic" | "style-mocking"
-            | "emotion-annoyed" | "皮肉" | "呆れ" => {
+            // 14b. Carry Sarcastic / Sardonic / Mocking / Smug / Smirking / Exasperated / Cold
+            "sarcastic" | "sarcastically" | "sarcasm" | "sardonic" | "ironic" | "mocking"
+            | "mockingly" | "smug" | "smugly" | "smirk" | "smirking" | "exasperated"
+            | "exasperatedly" | "annoyed" | "cold" | "coldly" | "grim" | "grimly"
+            | "dismissive" | "dismissively" | "suspicious" | "suspiciously"
+            | "style-sarcastic" | "style-mocking" | "emotion-annoyed"
+            | "皮肉" | "呆れ" => {
                 sliders.insert("angry".to_string(), 0.35);
                 sliders.insert("sad".to_string(), 0.2);
                 Some(EmotionProfile {
@@ -768,8 +797,8 @@ impl EmotionParser {
             }
 
             // 16. Reset / Calm / Neutral
-            "reset" | "narration" | "narrator" | "calm" | "calmly" | "neutral" | "normal"
-            | "serious" | "seriously" | "thoughtful" | "thoughtfully" | "determined"
+            "reset" | "default" | "narration" | "narrator" | "calm" | "calmly" | "neutral"
+            | "normal" | "serious" | "seriously" | "thoughtful" | "thoughtfully" | "determined"
             | "deadpan" | "monotone" | "confused" | "emotion-calm" | "emotion-contemplation"
             | "emotion-determination" | "style-narration" | "落ち着き" => Some(EmotionProfile {
                 layer: TagLayer::Reset,
@@ -1593,5 +1622,118 @@ mod tests {
         let parsed2 = EmotionParser::parse(input2);
         assert_eq!(parsed2.cleaned_text, "おやすみなさい。");
         assert_eq!(parsed2.detected_tags, vec!["chuckle"]);
+    }
+
+    #[test]
+    fn test_zonos2_emotion_sliders_only_emit_supported_directions_and_cover_kitt_nina_tags() {
+        let valid_keys = ["happy", "sad", "angry", "surprised", "valence", "arousal"];
+
+        // Exhaustive check across gasp/fear/stutter/disgust, all nina_agent canonical tags,
+        // and all 25 kitt_agent mood enum values!
+        let all_tags = [
+            // Previously offending tags that emitted "fear" or "disgust"
+            "gasp",
+            "pant",
+            "panting",
+            "breathless",
+            "stutter",
+            "stuttering",
+            "stammer",
+            "fear",
+            "scared",
+            "panicked",
+            "nervous",
+            "anxious",
+            "flustered",
+            "urgent",
+            "disgust",
+            "disgusted",
+            "嫌悪",
+            "ハッ",
+            // nina_agent Carry + OneShot canonical tags
+            "happy",
+            "excited",
+            "teasing",
+            "gently",
+            "whisper",
+            "shy",
+            "pout",
+            "angry",
+            "exasperated",
+            "sad",
+            "worried",
+            "trembling",
+            "pleading",
+            "sleepy",
+            "relieved",
+            "fast",
+            "slowly",
+            "calm",
+            "laughter",
+            "sigh",
+            "surprised",
+            "sobbing",
+            "yawn",
+            "screaming",
+            "tsk",
+            "questioning",
+            "humming",
+            "nod",
+            "clear throat",
+            "cough",
+            "gulp",
+            "pause",
+            // All 25 kitt_agent JSON schema moods
+            "playful",
+            "amused",
+            "lovely",
+            "neutral",
+            "irritated",
+            "sassy",
+            "flirty",
+            "smug",
+            "sarcastic",
+            "assertive",
+            "default",
+            "sardonic",
+            "seductive",
+            "smirking",
+            "mocking",
+            "kindly",
+            "assisting",
+        ];
+
+        for tag in all_tags {
+            let input = format!("[mood:happy] [{tag}] へえーっ、さらに数度も寒いんだね！");
+            let chunks = EmotionParser::parse_chunks(&input);
+            assert!(!chunks.is_empty(), "parse_chunks returned empty for [{tag}]");
+            for chunk in chunks {
+                for key in chunk.emotion_sliders.keys() {
+                    assert!(
+                        valid_keys.contains(&key.as_str()),
+                        "Tag '[{tag}]' produced unsupported Zonos 2 slider key '{key}' (sliders: {:?})",
+                        chunk.emotion_sliders
+                    );
+                }
+            }
+        }
+
+        // Verify all 6 kitt_agent-specific moods classify as Carry tags and populate effective_tags
+        for kitt_mood in [
+            "assisting",
+            "lovely",
+            "sassy",
+            "assertive",
+            "sardonic",
+            "smirking",
+        ] {
+            let profile = EmotionParser::classify_tag(kitt_mood)
+                .unwrap_or_else(|| panic!("kitt_agent mood '{kitt_mood}' must be classified"));
+            assert_eq!(profile.layer, TagLayer::Carry);
+
+            let parsed = EmotionParser::parse(&format!("[{kitt_mood}] マイケル、了解です！"));
+            assert!(parsed.emotion_enabled, "'{kitt_mood}' must enable emotion");
+            assert_eq!(parsed.effective_tags, vec![kitt_mood]);
+        }
     }
 }

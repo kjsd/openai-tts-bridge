@@ -21,6 +21,17 @@ pub mod types;
 pub use client::{ResolvedZonos2Speaker, ZonosClient};
 pub use types::ZonosGenerateRequest;
 
+/// Official Zonos 2 supported `emotion_sliders` keys.
+/// Any key outside this set triggers HTTP 400 (`Unknown emotion direction`) on Zonos 2.
+pub const ZONOS2_VALID_EMOTION_KEYS: &[&str] = &[
+    "happy",
+    "sad",
+    "angry",
+    "surprised",
+    "valence",
+    "arousal",
+];
+
 const MULTI_CHUNK_SILENCE_MS: u32 = 60;
 
 #[derive(Debug, Clone)]
@@ -72,6 +83,16 @@ impl ZonosEngine {
         self.client.clear_cache().await;
     }
 
+    fn sanitize_zonos2_sliders(
+        sliders: &std::collections::HashMap<String, f32>,
+    ) -> std::collections::HashMap<String, f32> {
+        sliders
+            .iter()
+            .filter(|(k, _)| ZONOS2_VALID_EMOTION_KEYS.contains(&k.as_str()))
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+
     fn build_generate_request(
         chunk: &PreparedZonos2Chunk,
         language: &str,
@@ -89,16 +110,27 @@ impl ZonosEngine {
                 None => (Some(default_voice.to_string()), None, None),
             };
 
+        let emotion_sliders = Self::sanitize_zonos2_sliders(&chunk.parsed.emotion_sliders);
+        let emotion_enabled = chunk.parsed.emotion_enabled && !emotion_sliders.is_empty();
+
         ZonosGenerateRequest {
             text: chunk.normalized_text.clone(),
             speaker_embedding_name,
             speaker_embedding_id,
             speaker_audio_base64,
             language: language.to_string(),
-            emotion_enabled: chunk.parsed.emotion_enabled,
-            emotion_sliders: chunk.parsed.emotion_sliders.clone(),
-            emotion_valence: chunk.parsed.emotion_valence,
-            emotion_arousal: chunk.parsed.emotion_arousal,
+            emotion_enabled,
+            emotion_sliders,
+            emotion_valence: if emotion_enabled {
+                chunk.parsed.emotion_valence
+            } else {
+                None
+            },
+            emotion_arousal: if emotion_enabled {
+                chunk.parsed.emotion_arousal
+            } else {
+                None
+            },
             emotion_cfg_scale: chunk.parsed.emotion_cfg_scale,
             speed: chunk.final_speed,
             speaking_rate_enabled: true,
@@ -210,18 +242,22 @@ impl TtsEngine for ZonosEngine {
             .collect();
         let processed_text = chunk_texts.join(" ");
         let first = &prepared.chunks[0];
+        let first_sliders = Self::sanitize_zonos2_sliders(&first.parsed.emotion_sliders);
+        let first_enabled = first.parsed.emotion_enabled && !first_sliders.is_empty();
 
         let chunk_params: Vec<serde_json::Value> = prepared
             .chunks
             .iter()
             .map(|c| {
+                let sliders = Self::sanitize_zonos2_sliders(&c.parsed.emotion_sliders);
+                let enabled = c.parsed.emotion_enabled && !sliders.is_empty();
                 json!({
                     "text": c.normalized_text,
                     "speed": c.final_speed,
-                    "emotion_enabled": c.parsed.emotion_enabled,
-                    "emotion_sliders": c.parsed.emotion_sliders,
-                    "emotion_valence": c.parsed.emotion_valence,
-                    "emotion_arousal": c.parsed.emotion_arousal,
+                    "emotion_enabled": enabled,
+                    "emotion_sliders": sliders,
+                    "emotion_valence": if enabled { c.parsed.emotion_valence } else { None },
+                    "emotion_arousal": if enabled { c.parsed.emotion_arousal } else { None },
                     "emotion_cfg_scale": c.parsed.emotion_cfg_scale,
                     "accurate_mode": c.parsed.accurate_mode,
                 })
@@ -237,10 +273,10 @@ impl TtsEngine for ZonosEngine {
                 "voice": prepared.voice,
                 "language": prepared.language,
                 "speed": first.final_speed,
-                "emotion_enabled": first.parsed.emotion_enabled,
-                "emotion_sliders": first.parsed.emotion_sliders,
-                "emotion_valence": first.parsed.emotion_valence,
-                "emotion_arousal": first.parsed.emotion_arousal,
+                "emotion_enabled": first_enabled,
+                "emotion_sliders": first_sliders,
+                "emotion_valence": if first_enabled { first.parsed.emotion_valence } else { None },
+                "emotion_arousal": if first_enabled { first.parsed.emotion_arousal } else { None },
                 "emotion_cfg_scale": first.parsed.emotion_cfg_scale,
                 "accurate_mode": first.parsed.accurate_mode,
                 "chunk_parameters": chunk_params,
